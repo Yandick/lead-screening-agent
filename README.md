@@ -22,7 +22,15 @@ conda activate kapibala
 pip install -e ".[dev]"
 cp .env.example .env   # 填入 GEMINI_API_KEY
 pytest                 # 跑测试
-# CLI 入口（M2 提供）：kapibala 或 python -m kapibala.cli
+python -m kapibala.cli # 启动终端 demo（当前为 fake 模式，用 script 命令预排 LLM 判定）
+```
+
+fake 模式演示示例：
+
+```text
+script intent=off_topic          # 预排下一次 LLM 判定
+msg c1 今天天气真好               # 处理一条客户消息
+show_state c1 / reactivate c1 / run_followups
 ```
 
 ## 约束保证机制（随开发进度更新）
@@ -32,7 +40,7 @@ pytest                 # 跑测试
 | 任意 60 秒滑动窗口最多 1 条主动消息 | `rate_limiter.py` 滑动窗口 + `executor.py` 统一发送函数（唯一写时间戳处） | ✅ M1 已实现并测试（含 59s/60s 边界） |
 | 连续 2 次 off_topic / dissatisfied 必转人工 | `state_machine.py` 共享计数器，代码写死、不依赖 LLM 输出 | ✅ M1 已实现并测试 |
 | 对话内容无法越权执行动作 | `executor.py` 动作 allowlist（非 `Action` 枚举一律拒绝）+ escalated/closed 状态门禁 | ✅ M1 已实现并测试 |
-| 防套系统提示词/内部规则 | 分类与生成分离 + canary 哨兵 + 输出审查（已知局限：无法 100% 拦截自然语言泄露） | M2 待实现 |
+| 防套系统提示词/内部规则 | 分类与生成分离 + `output_guard.py`（canary 哨兵 + 凭证正则 + 长度检查，命中即替换安全回复） | ✅ M2 已实现并测试（已知局限见下） |
 
 ## 已知局限
 
@@ -46,3 +54,4 @@ pytest                 # 跑测试
 |--------|------|----------|
 | M0 | 仓库与项目骨架、LLMAdapter 接口、真值表文档、冒烟测试 | 约 20 分钟（含 conda 环境创建与镜像源排障） |
 | M1 | 状态机、策略真值表、滑动窗口限流器、执行层（allowlist/门禁/审计），44 个测试全绿 | 约 20 分钟 |
+| M2 | 管道串通（agent.py）、FakeAdapter、CLI 端到端、canary/正则/长度输出防护、run_followups，累计 65 个测试全绿 | 约 25 分钟 |
