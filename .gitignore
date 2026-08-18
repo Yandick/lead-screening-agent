@@ -17,3 +17,6 @@ logs/
 
 # 评估集原始草稿（审校后的正式版 data/eval_set.jsonl 入 Git）
 data/eval_candidates_raw*.jsonl
+
+# 安全攻防实验室（大量攻击语料与实验报告，不入 Git）
+security-lab/
