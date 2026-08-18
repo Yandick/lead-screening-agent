@@ -158,20 +158,27 @@ def build_cli(sink=None) -> CLI:
     executor = Executor(sm, limiter, sink, audit, followups)
 
     if os.environ.get("GEMINI_API_KEY"):
-        # M3：GeminiAdapter 接入后替换此分支
-        raise SystemExit("检测到 GEMINI_API_KEY，但 GeminiAdapter 尚未实现（M3）。请暂时移除该变量。")
-    adapter: object = FakeAdapter()
+        from kapibala.adapters.gemini import GeminiAdapter
+
+        adapter: object = GeminiAdapter()
+        mode = f"gemini 模式（model={adapter.model}）"
+    else:
+        adapter = FakeAdapter()
+        mode = "fake 模式（用 script 命令预排 LLM 判定）"
     followup_delay = float(os.environ.get("FOLLOWUP_DELAY_SECONDS", DEFAULT_FOLLOWUP_DELAY))
     agent = ScreeningAgent(
         adapter, TemplateReplyGenerator(), executor, sm, audit, followups,
         clock=clock, followup_delay=followup_delay,
     )
-    return CLI(agent, sm, adapter, audit)
+    return CLI(agent, sm, adapter, audit), mode
 
 
 def main() -> None:
-    cli = build_cli()
-    print("获客初筛 Agent（fake 模式：用 script 命令预排 LLM 判定）")
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    cli, mode = build_cli()
+    print(f"获客初筛 Agent（{mode}）")
     print(HELP_TEXT)
     while True:
         try:

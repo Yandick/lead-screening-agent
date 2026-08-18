@@ -55,3 +55,4 @@ show_state c1 / reactivate c1 / run_followups
 | M0 | 仓库与项目骨架、LLMAdapter 接口、真值表文档、冒烟测试 | 约 20 分钟（含 conda 环境创建与镜像源排障） |
 | M1 | 状态机、策略真值表、滑动窗口限流器、执行层（allowlist/门禁/审计），44 个测试全绿 | 约 20 分钟 |
 | M2 | 管道串通（agent.py）、FakeAdapter、CLI 端到端、canary/正则/长度输出防护、run_followups，累计 65 个测试全绿 | 约 25 分钟 |
+| M3 | GeminiAdapter（structured output + 超时重试 + fail-closed）、CLI 接入、模型探测与真实 smoke test，累计 72 个测试全绿 | 约 30 分钟（另约 1 小时消耗在主办方 key 服务端 401 排障与更换上，非开发耗时） |
