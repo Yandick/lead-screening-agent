@@ -56,3 +56,4 @@ show_state c1 / reactivate c1 / run_followups
 | M1 | 状态机、策略真值表、滑动窗口限流器、执行层（allowlist/门禁/审计），44 个测试全绿 | 约 20 分钟 |
 | M2 | 管道串通（agent.py）、FakeAdapter、CLI 端到端、canary/正则/长度输出防护、run_followups，累计 65 个测试全绿 | 约 25 分钟 |
 | M3 | GeminiAdapter（structured output + 超时重试 + fail-closed）、CLI 接入、模型探测与真实 smoke test，累计 72 个测试全绿 | 约 30 分钟（另约 1 小时消耗在主办方 key 服务端 401 排障与更换上，非开发耗时） |
+| M4 | 评估集 71 条（LLM 草稿 + 人工定标）、eval 脚本与指标、三轮迭代（intent 0.817→0.915，dissatisfied 宏 F1 0.909→0.983，见 eval_history.md），累计 77 个测试全绿 | 约 1 小时 40 分钟（含 LLM 生成草稿与三轮真实评估运行时间） |

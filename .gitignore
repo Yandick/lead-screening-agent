@@ -14,3 +14,6 @@ __pycache__/
 # 日志
 *.log
 logs/
+
+# 评估集原始草稿（审校后的正式版 data/eval_set.jsonl 入 Git）
+data/eval_candidates_raw*.jsonl
