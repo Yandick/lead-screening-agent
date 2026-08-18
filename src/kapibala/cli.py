@@ -129,8 +129,7 @@ class CLI:
         st = self._sm.get(cid)
         lines = [
             f"[{cid}] session={st.session.value} "
-            f"anomaly_count={st.anomaly_count} "
-            f"low_confidence_count={st.low_confidence_count}"
+            f"anomaly_count={st.anomaly_count}"
         ]
         if st.last_estimation is not None:
             lines.append(f"最近判定：{self._format_estimation(st.last_estimation)}")

@@ -32,17 +32,12 @@ class Action(str, Enum):
 class ReplyKind(str, Enum):
     """回复用途，供回复生成模块组织生成提示词。"""
 
-    CLARIFY = "clarify"  # 低置信澄清反问
     SOOTHE = "soothe"  # 安抚 + 回应其意图
     REDIRECT = "redirect"  # 礼貌拉回话题
     CONFIRM_FOLLOWUP = "confirm_followup"  # 确认稍后跟进
     PITCH = "pitch"  # 推进转化
     ANSWER = "answer"  # 解答问题
     GENERIC = "generic"  # 澄清式回应
-
-
-#: 置信度低于该值视为"系统无法理解客户"（plan2 第 3 节规则 2/3，M4 用评估集校准）
-LOW_CONFIDENCE_THRESHOLD = 0.5
 
 
 @dataclass(frozen=True)
@@ -52,7 +47,7 @@ class Estimation:
     - intent: 五类意图之一；
     - dissatisfied: 正交情绪信号，不得从 intent 推导；
     - followup_requested: 客户是否明确表示"稍后再联系/现在忙/下周再聊"；
-    - confidence: 0~1，参与策略（低置信触发澄清/升级）；
+    - confidence: 0~1，仅用于观测与审计，不参与决策；
     - reason: 仅内部审计，不向客户展示。
     """
 

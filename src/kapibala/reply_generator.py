@@ -12,7 +12,6 @@ from abc import ABC, abstractmethod
 from kapibala.schemas import Estimation, ReplyKind
 
 _TEMPLATES = {
-    ReplyKind.CLARIFY: "想确认一下，方便把您的需求再说得具体一点吗？我好为您安排合适的人对接。",
     ReplyKind.SOOTHE: "非常抱歉给您带来了不好的体验，您反馈的问题我已经记下了，我们会尽快跟进改进。",
     ReplyKind.REDIRECT: "哈哈这个我可答不上来。还是说回正事——您对我们的产品还有什么想了解的吗？",
     ReplyKind.CONFIRM_FOLLOWUP: "好的，那不打扰您了，我们稍后再联系，祝您顺利！",

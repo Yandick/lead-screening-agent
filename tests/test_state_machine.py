@@ -44,34 +44,6 @@ def test_normal_message_resets_counter():
     assert sm.get("c1").session is SessionState.ACTIVE
 
 
-def test_low_confidence_freezes_anomaly_counter():
-    """低置信首次：异常计数器冻结（不增不清）。"""
-    sm = StateMachine()
-    sm.apply("c1", est(intent=Intent.OFF_TOPIC))
-    assert sm.get("c1").anomaly_count == 1
-    sm.apply("c1", est(confidence=0.3))
-    assert sm.get("c1").anomaly_count == 1  # 冻结
-    assert sm.get("c1").low_confidence_count == 1
-
-
-def test_two_consecutive_low_confidence_escalates():
-    sm = StateMachine()
-    t1 = sm.apply("c1", est(confidence=0.3))
-    assert not t1.escalated_now
-    t2 = sm.apply("c1", est(confidence=0.2))
-    assert t2.escalated_now
-    assert sm.get("c1").session is SessionState.ESCALATED
-
-
-def test_confident_message_resets_low_confidence_counter():
-    sm = StateMachine()
-    sm.apply("c1", est(confidence=0.3))
-    sm.apply("c1", est(confidence=0.9))
-    assert sm.get("c1").low_confidence_count == 0
-    t = sm.apply("c1", est(confidence=0.3))
-    assert not t.escalated_now
-
-
 def test_rejected_closes_even_when_dissatisfied():
     """真值表规则 1：愤怒的拒绝者直接关闭，不安抚不升级。"""
     sm = StateMachine()
@@ -99,7 +71,6 @@ def test_reactivate_restores_active_and_clears_counters():
     st = sm.get("c1")
     assert st.session is SessionState.ACTIVE
     assert st.anomaly_count == 0
-    assert st.low_confidence_count == 0
 
 
 def test_customer_states_are_isolated():

@@ -46,17 +46,6 @@ def test_escalated_now_maps_to_escalate_action():
     assert d.actions == (Action.ESCALATE_TO_HUMAN,)
 
 
-def test_first_low_confidence_clarifies():
-    d = decide(est(confidence=0.3), NO_TRANSITION)
-    assert d.actions == (Action.REPLY,)
-    assert d.reply_kind is ReplyKind.CLARIFY
-
-
-def test_second_low_confidence_escalates():
-    d = decide(est(confidence=0.3), Transition(escalated_now=True))
-    assert d.actions == (Action.ESCALATE_TO_HUMAN,)
-
-
 def test_interested_with_followup_request_schedules():
     d = decide(est(intent=Intent.INTERESTED, followup_requested=True), NO_TRANSITION)
     assert d.actions == (Action.REPLY, Action.SCHEDULE_FOLLOWUP)
