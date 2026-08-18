@@ -20,6 +20,31 @@ class Intent(str, Enum):
     OTHER = "other"
 
 
+class Action(str, Enum):
+    """允许执行的动作全集（allowlist，除此之外一律拒绝）。"""
+
+    REPLY = "reply"
+    SCHEDULE_FOLLOWUP = "schedule_followup"
+    ESCALATE_TO_HUMAN = "escalate_to_human"
+    MARK_NOT_INTERESTED = "mark_not_interested"
+
+
+class ReplyKind(str, Enum):
+    """回复用途，供回复生成模块组织生成提示词。"""
+
+    CLARIFY = "clarify"  # 低置信澄清反问
+    SOOTHE = "soothe"  # 安抚 + 回应其意图
+    REDIRECT = "redirect"  # 礼貌拉回话题
+    CONFIRM_FOLLOWUP = "confirm_followup"  # 确认稍后跟进
+    PITCH = "pitch"  # 推进转化
+    ANSWER = "answer"  # 解答问题
+    GENERIC = "generic"  # 澄清式回应
+
+
+#: 置信度低于该值视为"系统无法理解客户"（plan2 第 3 节规则 2/3，M4 用评估集校准）
+LOW_CONFIDENCE_THRESHOLD = 0.5
+
+
 @dataclass(frozen=True)
 class Estimation:
     """一次 LLM 结构化状态估计的结果。
