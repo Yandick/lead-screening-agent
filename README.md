@@ -62,8 +62,8 @@ show_state c1 / reactivate c1 / run_followups
 ## 已知局限
 
 - 内存存储，进程重启后状态清空；
-- **回复为首版模板生成**（主动砍掉 LLM 自由生成：泄露面最小化，是范围取舍而非遗漏）；`output_guard` 作为发送前统一检查保留，canary 机制为接入 LLM 生成预留且已测试；
-- 自然语言泄露防御（约束 4）无法 100% 保证：模板方案下泄露面为零，但代价是回复灵活度；若接入 LLM 生成，可强制保证的仍只是动作越权、升级静默与限流；
+- 回复生成两种实现：fake 模式用确定性模板（泄露面为零）；gemini 模式用 LLM 生成（R2），生成 prompt 已实际埋入 canary 哨兵，失败自动回退模板，发送前一律过 `output_guard`；
+- 自然语言泄露防御（约束 4）无法 100% 保证：LLM 生成下可强制保证的仍只是动作越权、升级静默、限流与 canary/凭证正则拦截，隐晦改写与多轮诱导防御见 security-lab 后续实验；
 - `interested`/`needs_info` 边界存在固有模糊（见 eval_history.md），两者策略动作同为 `reply`，不影响安全性；
 - 首版无真实 IM / 数据库 / 前端。
 
@@ -78,3 +78,4 @@ show_state c1 / reactivate c1 / run_followups
 | M4     | 双语评估集 95 条（LLM 草稿 + 人工定标）、eval 脚本与指标、四轮记录（intent 0.817→0.916，dissatisfied 宏 F1 0.909→0.974，见 eval_history.md），累计 77 个测试全绿 | 约 2 小时（含 LLM 生成草稿与四轮真实评估运行时间）                            |
 | M5     | 红蓝攻防（手工 12 条基底 + LLM 变体 12 条，24/24 通过）、攻击报告、README 交付                                                                                   | 约 30 分钟                                                                    |
 | R1     | 设计评审后移除低置信降级机制（真值表 9→7 条）；新增防抖聚合层（连发合并处理，碎片不再重复计数/误触发升级），79 测试全绿                                                | 约 1 小时（含设计分析讨论）                                                  |
+| R2     | LLM 生成式回复草稿（GeminiReplyGenerator，prompt 埋 canary、失败回退模板）、GeminiAdapter.generate_text，84 测试全绿，真实 API 冒烟通过                                  | 约 20 分钟                                                                   |

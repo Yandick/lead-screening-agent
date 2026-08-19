@@ -1,8 +1,8 @@
 """回复生成器接口与模板实现。
 
 回复生成与意图分类是两次独立调用（plan2 第 4 节）；生成 prompt 不含任何
-内部机密。M2 先用模板生成器打通管道，M3 增加 LLM 生成实现（其系统提示词
-中埋入 output_guard.CANARY_TOKEN 哨兵）。
+内部机密。M2 先用模板生成器打通管道，R2 增加 LLM 生成实现
+（gemini_reply.GeminiReplyGenerator，其提示词中埋入 output_guard.CANARY_TOKEN 哨兵）。
 """
 
 from __future__ import annotations

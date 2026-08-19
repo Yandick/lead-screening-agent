@@ -149,3 +149,25 @@ class GeminiAdapter(LLMAdapter):
         raise LLMError(
             f"Gemini 调用失败（{self._max_retries + 1} 次尝试均失败）：{last_error}"
         )
+
+    def generate_text(self, prompt: str) -> str:
+        """自由文本生成（回复草稿用）。失败语义同 estimate：重试耗尽抛 LLMError。"""
+        last_error: Exception | None = None
+        for _attempt in range(self._max_retries + 1):
+            try:
+                response = self._client.models.generate_content(
+                    model=self._model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.0),
+                )
+                text = (response.text or "").strip()
+                if not text:
+                    raise LLMError("模型返回空文本")
+                return text
+            except LLMError as exc:
+                last_error = exc
+            except Exception as exc:  # 超时 / 网络 / API 报错
+                last_error = exc
+        raise LLMError(
+            f"Gemini 文本生成失败（{self._max_retries + 1} 次尝试均失败）：{last_error}"
+        )

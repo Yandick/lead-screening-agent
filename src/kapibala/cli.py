@@ -211,15 +211,18 @@ def build_cli(sink=None) -> CLI:
 
     if os.environ.get("GEMINI_API_KEY"):
         from kapibala.adapters.gemini import GeminiAdapter
+        from kapibala.gemini_reply import GeminiReplyGenerator
 
         adapter: object = GeminiAdapter()
-        mode = f"gemini 模式（model={adapter.model}）"
+        generator = GeminiReplyGenerator(adapter)
+        mode = f"gemini 模式（model={adapter.model}，LLM 生成回复）"
     else:
         adapter = FakeAdapter()
+        generator = TemplateReplyGenerator()
         mode = "fake 模式（用 script 命令预排 LLM 判定）"
     followup_delay = float(os.environ.get("FOLLOWUP_DELAY_SECONDS", DEFAULT_FOLLOWUP_DELAY))
     agent = ScreeningAgent(
-        adapter, TemplateReplyGenerator(), executor, sm, audit, followups,
+        adapter, generator, executor, sm, audit, followups,
         clock=clock, followup_delay=followup_delay,
     )
     from kapibala.debounce import MessageDebouncer
