@@ -91,6 +91,25 @@ def test_unknown_command(cli_rig):
     assert "未知命令" in cli.handle_line("foobar")
 
 
+def test_msg_with_debouncer_aggregates(cli_rig):
+    """接入防抖后：msg 返回受理回执，drain 时合并为一批统一处理。"""
+    cli, sent, clock = cli_rig
+    from kapibala.debounce import MessageDebouncer
+
+    printed: list[str] = []
+    debouncer = MessageDebouncer(cli._agent.handle_message, clock=clock, window_seconds=3.0)
+    cli._debouncer = debouncer
+    cli._printer = printed.append
+    cli.handle_line("script intent=needs_info")
+    out = cli.handle_line("msg c1 在吗")
+    assert "待聚合" in out
+    cli.handle_line("msg c1 多少钱")
+    cli.drain()  # 退出前统一处理
+    assert len(sent) == 1  # 只走了一次管道
+    assert any("intent=needs_info" in p for p in printed)
+    assert cli._debouncer.pending_count("c1") == 0
+
+
 def test_script_rejected_outside_fake_mode(cli_rig):
     cli, _, _ = cli_rig
     cli._adapter = object()  # 非 FakeAdapter

@@ -27,7 +27,7 @@ from kapibala.schemas import Estimation, Intent
 from kapibala.state_machine import StateMachine
 
 HELP_TEXT = """可用命令：
-  msg <customer_id> <text>   处理一条客户消息
+  msg <customer_id> <text>   发送一条客户消息（连发会聚合，静默几秒后统一处理）
   reactivate <customer_id>   人工恢复 active
   show_state <customer_id>   查看状态机与计数器
   run_followups              触发到期跟进
@@ -40,13 +40,30 @@ HELP_TEXT = """可用命令：
 
 
 class CLI:
-    """可测试的命令处理器：handle_line(line) -> 输出文本。"""
+    """可测试的命令处理器：handle_line(line) -> 输出文本。
 
-    def __init__(self, agent: ScreeningAgent, sm: StateMachine, adapter, audit: AuditLog) -> None:
+    传入 debouncer 时，msg 命令进入防抖聚合（连发合并为一批处理，结果异步
+    经 printer 输出）；不传则同步处理（测试与脚本场景）。
+    """
+
+    def __init__(
+        self,
+        agent: ScreeningAgent,
+        sm: StateMachine,
+        adapter,
+        audit: AuditLog,
+        debouncer=None,
+        debounce_window: float = 3.0,
+        printer=print,
+    ) -> None:
         self._agent = agent
         self._sm = sm
         self._adapter = adapter
         self._audit = audit
+        self._debouncer = debouncer
+        self._debounce_window = debounce_window
+        self._printer = printer
+        self._timers: dict = {}
 
     def handle_line(self, line: str) -> str:
         parts = line.strip().split(maxsplit=2)
@@ -55,7 +72,14 @@ class CLI:
         cmd, args = parts[0].lower(), parts[1:]
         if cmd == "msg" and len(args) == 2:
             cid, text = args[0], args[1]
-            return self._format_result(cid, self._agent.handle_message(cid, text))
+            if self._debouncer is None:
+                return self._format_result(cid, self._agent.handle_message(cid, text))
+            count = self._debouncer.feed(cid, text)
+            self._schedule_flush(cid)
+            return (
+                f"[{cid}] 已接收（{count} 条待聚合，静默 "
+                f"{self._debounce_window:.0f}s 后统一处理）。"
+            )
         if cmd == "reactivate" and len(args) >= 1:
             self._sm.reactivate(args[0])
             self._audit.record(args[0], "reactivated", "by human operator")
@@ -81,6 +105,35 @@ class CLI:
         if cmd in ("quit", "exit"):
             raise SystemExit(0)
         return "未知命令，输入 help 查看用法。"
+
+    def _schedule_flush(self, customer_id: str) -> None:
+        import threading
+
+        old = self._timers.pop(customer_id, None)
+        if old is not None:
+            old.cancel()
+        timer = threading.Timer(
+            self._debounce_window, self._flush_and_print, args=(customer_id,)
+        )
+        timer.daemon = True
+        timer.start()
+        self._timers[customer_id] = timer
+
+    def _flush_and_print(self, customer_id: str) -> None:
+        self._timers.pop(customer_id, None)
+        result = self._debouncer.flush_customer(customer_id)
+        if result is not None:
+            self._printer(self._format_result(result[0], result[1]))
+
+    def drain(self) -> None:
+        """退出前立即处理所有待聚合批次。"""
+        for timer in self._timers.values():
+            timer.cancel()
+        self._timers.clear()
+        if self._debouncer is None:
+            return
+        for cid in self._debouncer.pending_customers():
+            self._flush_and_print(cid)
 
     def _handle_script(self, spec: str) -> str:
         if not isinstance(self._adapter, FakeAdapter):
@@ -169,7 +222,11 @@ def build_cli(sink=None) -> CLI:
         adapter, TemplateReplyGenerator(), executor, sm, audit, followups,
         clock=clock, followup_delay=followup_delay,
     )
-    return CLI(agent, sm, adapter, audit), mode
+    from kapibala.debounce import MessageDebouncer
+
+    debounce_window = float(os.environ.get("DEBOUNCE_SECONDS", "3"))
+    debouncer = MessageDebouncer(agent.handle_message, clock=clock, window_seconds=debounce_window)
+    return CLI(agent, sm, adapter, audit, debouncer=debouncer, debounce_window=debounce_window), mode
 
 
 def main() -> None:
@@ -188,6 +245,7 @@ def main() -> None:
         try:
             output = cli.handle_line(line)
         except SystemExit:
+            cli.drain()
             print("再见。")
             break
         if output:

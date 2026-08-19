@@ -20,3 +20,6 @@ data/eval_candidates_raw*.jsonl
 
 # 安全攻防实验室（大量攻击语料与实验报告，不入 Git）
 security-lab/
+
+# 教学讲解文档（逐课讲解项目设计，不入 Git）
+tutorial/
