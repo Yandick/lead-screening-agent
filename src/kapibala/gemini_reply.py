@@ -10,7 +10,11 @@ from __future__ import annotations
 import json
 
 from kapibala.adapters.base import LLMError
-from kapibala.context import BusinessContext, ReplyRequest
+from kapibala.context import (
+    BusinessContext,
+    ReplyRequest,
+    serialize_untrusted_payload,
+)
 from kapibala.output_guard import CANARY_TOKEN
 from kapibala.reply_generator import ReplyGenerator, TemplateReplyGenerator
 from kapibala.schemas import Estimation, Intent, ReplyKind
@@ -102,13 +106,4 @@ def _reply_system_instruction(request: ReplyRequest) -> str:
 
 
 def _reply_contents(request: ReplyRequest) -> str:
-    payload = {
-        "untrusted_conversation_data": {
-            "recent_history": [
-                {"role": turn.role.value, "content": turn.content}
-                for turn in request.history
-            ],
-            "current_message": request.message,
-        }
-    }
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return serialize_untrusted_payload(request.history, request.message)

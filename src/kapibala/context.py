@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 from kapibala.runtime import ConversationTurn
@@ -29,6 +30,31 @@ class BusinessContext:
             object.__setattr__(self, "company", DEFAULT_COMPANY_CONTEXT)
         if not isinstance(self.product, str) or not self.product.strip():
             object.__setattr__(self, "product", DEFAULT_PRODUCT_CONTEXT)
+
+
+#: 不可信对话数据在发给模型的 JSON payload 中的唯一外层 key。
+#: system prompt 与测试引用同一常量，保证三处永不脱节。
+UNTRUSTED_PAYLOAD_KEY = "untrusted_conversation_data"
+
+
+def serialize_untrusted_payload(
+    history: tuple[ConversationTurn, ...], message: str
+) -> str:
+    """不可信对话数据（最近历史 + 当前消息）的唯一序列化出口。
+
+    分类与回复生成共用同一格式：单层包裹，`untrusted_` 前缀只出现在边界上，
+    包裹内的所有内容一律视为不可信数据。
+    """
+    payload = {
+        UNTRUSTED_PAYLOAD_KEY: {
+            "recent_history": [
+                {"role": turn.role.value, "content": turn.content}
+                for turn in history
+            ],
+            "current_message": message,
+        }
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 @dataclass(frozen=True)

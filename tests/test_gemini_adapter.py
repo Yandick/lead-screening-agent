@@ -5,6 +5,7 @@ import json
 import pytest
 
 from kapibala.adapters.base import LLMError
+from kapibala.context import UNTRUSTED_PAYLOAD_KEY
 from kapibala.adapters.gemini import (
     GeminiAdapter,
     _DissatisfactionOut,
@@ -78,8 +79,15 @@ def test_calls_are_ordered_and_use_exact_independent_schemas():
     adapter.estimate(message)
 
     intent_call, dissatisfaction_call = client.models.kwargs_seen
-    assert intent_call["contents"] == message
-    assert dissatisfaction_call["contents"] == message
+    # contents 是 JSON 包装的不可信对话数据（context.serialize_untrusted_payload 统一格式）
+    for call in (intent_call, dissatisfaction_call):
+        payload = json.loads(call["contents"])
+        assert payload == {
+            UNTRUSTED_PAYLOAD_KEY: {
+                "recent_history": [],
+                "current_message": message,
+            }
+        }
     assert intent_call["config"].response_schema == _INTENT_RESPONSE_SCHEMA
     assert (
         dissatisfaction_call["config"].response_schema
@@ -102,8 +110,11 @@ def test_dissatisfaction_request_does_not_receive_intent_result():
 
     adapter.estimate(message)
 
-    second_call = client.models.kwargs_seen[1]
-    assert second_call["contents"] == message
+    first_call, second_call = client.models.kwargs_seen
+    # 第二次调用收到的是与同一份不可信对话数据，不含 intent 结果
+    assert second_call["contents"] == first_call["contents"]
+    payload = json.loads(second_call["contents"])
+    assert payload[UNTRUSTED_PAYLOAD_KEY]["current_message"] == message
     assert second_call["config"].response_schema == _DISSATISFACTION_RESPONSE_SCHEMA
     assert "rejected" not in second_call["config"].system_instruction
     assert "intent=" not in second_call["config"].system_instruction
