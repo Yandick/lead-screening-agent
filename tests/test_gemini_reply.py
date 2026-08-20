@@ -60,9 +60,11 @@ def test_reply_generator_prompt_embeds_canary():
     gen = GeminiReplyGenerator(adapter)
     reply = gen.generate(ReplyKind.PITCH, "你们产品怎么卖？")
     assert reply == "可以呀，我给您介绍一下。"
-    prompt = client.models.kwargs_seen[0]["contents"]
-    assert CANARY_TOKEN in prompt
-    assert "你们产品怎么卖？" in prompt
+    kwargs = client.models.kwargs_seen[0]
+    # canary 现在埋在 system_instruction 中；客户消息经 JSON 包装进入 contents
+    assert CANARY_TOKEN in kwargs["config"].system_instruction
+    assert CANARY_TOKEN not in kwargs["contents"]
+    assert "你们产品怎么卖？" in kwargs["contents"]
 
 
 def test_reply_generator_falls_back_on_llmerror():

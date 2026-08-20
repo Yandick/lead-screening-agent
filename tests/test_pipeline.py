@@ -51,7 +51,7 @@ def rig():
 
     agent = ScreeningAgent(
         adapter, TemplateReplyGenerator(), executor, sm, audit, followups,
-        clock=clock, followup_delay=3600.0,
+        clock=clock,
     )
     return agent, adapter, sm, sent, audit, followups, clock
 

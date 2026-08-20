@@ -36,7 +36,7 @@ def cli_rig():
     adapter = FakeAdapter()
     agent = ScreeningAgent(
         adapter, TemplateReplyGenerator(), executor, sm, audit, followups,
-        clock=clock, followup_delay=3600.0,
+        clock=clock,
     )
     return CLI(agent, sm, adapter, audit), sent, clock
 
