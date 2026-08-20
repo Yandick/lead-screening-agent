@@ -18,10 +18,14 @@ dev = [
 ]
 
 [project.scripts]
-kapibala = "kapibala.cli:main"
+kapibala = "kapibala.web:main"
+kapibala-cli = "kapibala.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+kapibala = ["static/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

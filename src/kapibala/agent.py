@@ -79,6 +79,10 @@ class ScreeningAgent:
         """Read-only access to the injected store for later context consumers."""
         return self._history
 
+    def pending_followups(self, customer_id: str | None = None) -> tuple[Followup, ...]:
+        """Return a read-only snapshot of queued trusted-operator follow-ups."""
+        return self._followups.snapshot(customer_id)
+
     def handle_message(self, customer_id: object, text: object) -> ProcessResult:
         try:
             runtime_input = RuntimeInput.validate(

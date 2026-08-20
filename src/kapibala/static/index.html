@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kapibala Screening Desk</title>
+  <link rel="stylesheet" href="/assets/web.css">
+  <script src="/assets/web.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark" aria-hidden="true"><span></span><span></span></div>
+    <div>
+      <h1>Kapibala</h1>
+      <p>Screening Desk</p>
+    </div>
+    <div class="mode-block">
+      <span id="connection-dot" class="connection-dot"></span>
+      <span id="mode-label">connecting</span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="conversation" aria-labelledby="conversation-title">
+      <div class="section-header">
+        <div>
+          <p class="eyebrow">CONVERSATION</p>
+          <h2 id="conversation-title">客户会话</h2>
+        </div>
+        <label class="customer-field">
+          <span>Customer ID</span>
+          <input id="customer-id" value="demo-001" maxlength="80" autocomplete="off">
+        </label>
+      </div>
+
+      <div id="conversation-log" class="conversation-log" aria-live="polite"></div>
+
+      <form id="message-form" class="composer">
+        <label for="message-input">客户消息</label>
+        <div class="composer-row">
+          <textarea id="message-input" rows="3" maxlength="4001" placeholder="输入本轮客户消息" required></textarea>
+          <button class="primary" type="submit">发送</button>
+        </div>
+      </form>
+
+      <div id="fake-controls" class="fake-controls" hidden>
+        <label>
+          <span>下一次意图</span>
+          <select id="fake-intent">
+            <option value="interested">interested</option>
+            <option value="needs_info">needs_info</option>
+            <option value="rejected">rejected</option>
+            <option value="off_topic">off_topic</option>
+            <option value="other" selected>other</option>
+          </select>
+        </label>
+        <label class="check-field">
+          <input id="fake-dissatisfied" type="checkbox">
+          <span>dissatisfied</span>
+        </label>
+        <button id="queue-script" class="secondary" type="button">预排判定</button>
+        <button id="queue-error" class="secondary danger-text" type="button">预排失败</button>
+      </div>
+    </section>
+
+    <aside class="inspector" aria-labelledby="inspector-title">
+      <div class="section-header inspector-heading">
+        <div>
+          <p class="eyebrow">OPERATOR</p>
+          <h2 id="inspector-title">运行状态</h2>
+        </div>
+        <button id="refresh" class="secondary" type="button">刷新</button>
+      </div>
+
+      <div class="status-grid">
+        <div><span>Session</span><strong id="session-value">active</strong></div>
+        <div><span>Bad streak</span><strong id="streak-value">0</strong></div>
+        <div><span>Intent</span><strong id="intent-value">none</strong></div>
+        <div><span>Pending</span><strong id="pending-value">0</strong></div>
+      </div>
+
+      <div class="operator-actions">
+        <form id="followup-form">
+          <div class="action-fields">
+            <label><span>延迟（秒）</span><input id="followup-delay" type="number" min="0" step="1" value="60" required></label>
+            <label><span>上下文</span><input id="followup-context" maxlength="200" placeholder="operator note"></label>
+          </div>
+          <button class="secondary" type="submit">标记跟进</button>
+        </form>
+        <div class="action-row">
+          <button id="run-followups" class="secondary" type="button">执行到期跟进</button>
+          <button id="reactivate" class="secondary" type="button">人工重新激活</button>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="运行详情">
+        <button class="tab active" data-tab="history" role="tab" aria-selected="true">历史</button>
+        <button class="tab" data-tab="followups" role="tab" aria-selected="false">待跟进</button>
+        <button class="tab" data-tab="audit" role="tab" aria-selected="false">审计</button>
+      </div>
+      <div id="detail-panel" class="detail-panel"></div>
+    </aside>
+  </main>
+
+  <div id="notice" class="notice" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -70,5 +70,12 @@ class FollowupQueue:
         self._items = [f for f in self._items if f.due_at > now]
         return due
 
+    def snapshot(self, customer_id: str | None = None) -> tuple[Followup, ...]:
+        """Return an immutable insertion-ordered view for operator inspection."""
+        items = tuple(self._items)
+        if customer_id is None:
+            return items
+        return tuple(item for item in items if item.customer_id == customer_id)
+
     def __len__(self) -> int:
         return len(self._items)
