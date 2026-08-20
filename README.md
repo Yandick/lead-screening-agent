@@ -102,3 +102,36 @@ show_state c1 / reactivate c1 / run_followups
 | A5     | 可信人工跟进标记、严格到期时间校验、限流/发送失败重试、升级保留与关闭取消，完成完整测试和真实 Gemini 验证                                                        | 约 25 分钟                                                                    |
 | A6     | 本地 Web UI、只读状态/历史/待跟进/审计视图、HTTP API、响应式浏览器检查与真实 Gemini 验证                                                                         | 约 45 分钟                                                                    |
 | R3     | 适配 A 系列重构后的测试（agent 新签名/双调用 adapter/canary 移位）；统一不可信对话数据序列化出口（context.serialize_untrusted_payload，分类与回复共用同一格式），103 测试全绿 + 真实 API 冒烟通过 | 约 40 分钟                                                                    |
+
+## 安装并启动 Web UI
+
+```bash
+cd /mnt/c/Users/user/Desktop/Interview/lead-screening-agent
+conda activate kapibala
+pip install -e ".[dev]"
+cp .env.example .env
+```
+
+如需使用真实 Gemini，请在 `.env` 中填写：
+
+```dotenv
+GEMINI_API_KEY=你的_API_Key
+```
+
+未配置 `GEMINI_API_KEY` 时会进入本地 fake 模式。
+
+```bash
+python -m kapibala.web
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8765
+```
+
+如需更换端口：
+
+```bash
+KAPIBALA_PORT=8766 python -m kapibala.web
+```

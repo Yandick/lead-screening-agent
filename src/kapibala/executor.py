@@ -14,7 +14,8 @@ from dataclasses import dataclass
 
 from kapibala.audit import AuditLog
 from kapibala.followup import Followup, FollowupQueue
-from kapibala.rate_limiter import SlidingWindowRateLimiter
+from kapibala.rate_limiter import RateLimitReservation, SlidingWindowRateLimiter
+from kapibala.reply_generator import HANDOFF_NOTICE
 from kapibala.schemas import Action
 from kapibala.state_machine import SessionState, StateMachine
 
@@ -97,19 +98,60 @@ class Executor:
         self._audit.record(customer_id, "marked_not_interested")
         return ExecutionResult(True, "closed")
 
+    def notify_handoff(self, customer_id: str) -> ExecutionResult:
+        """Send the one controlled transition notice for an escalated session.
+
+        This is deliberately separate from ``execute(Action.REPLY)``: ordinary
+        replies remain blocked after escalation, while the transition path can
+        emit a fixed, code-owned notice. The same customer rate limit applies.
+        """
+        if self._sm.get(customer_id).session is not SessionState.ESCALATED:
+            self._audit.record(
+                customer_id, "handoff_notice_rejected", "not_escalated"
+            )
+            return ExecutionResult(False, "not_escalated")
+        if not self._sm.consume_handoff_notice(customer_id):
+            self._audit.record(
+                customer_id, "handoff_notice_rejected", "already_attempted"
+            )
+            return ExecutionResult(False, "handoff_notice_already_attempted")
+
+        result = self._execute_reply(customer_id, HANDOFF_NOTICE)
+        event = "handoff_notice_sent" if result.executed else "handoff_notice_blocked"
+        self._audit.record(customer_id, event, result.reason)
+        return result
+
+    def reset_customer(self, customer_id: str) -> None:
+        """Clear executor-owned per-customer state for a new demo session."""
+        self._limiter.reset(customer_id)
+
+    def reply_wait_seconds(self, customer_id: str) -> float:
+        """Return the advisory delay before this customer can be sent again."""
+        return self._limiter.retry_after(customer_id)
+
     def _execute_reply(self, customer_id: str, reply_text: str | None) -> ExecutionResult:
         if not reply_text:
             self._audit.record(customer_id, "action_rejected", "empty_reply")
             return ExecutionResult(False, "empty_reply")
-        # 限流校验：被拒绝时静默不发送 + 写审计（可解释的安全降级）
-        if not self._limiter.allow(customer_id):
+        # 原子预占：并发调用中只有一个能进入 transport。
+        reservation = self._limiter.reserve(customer_id)
+        if reservation is None:
             self._audit.record(customer_id, "reply_rate_limited")
             return ExecutionResult(False, "rate_limited")
-        self._send(customer_id, reply_text)
+        self._send(customer_id, reply_text, reservation)
         return ExecutionResult(True, "sent")
 
-    def _send(self, customer_id: str, text: str) -> None:
-        """统一发送函数：所有客户可见消息的唯一出口，唯一写限流时间戳的地方。"""
-        self._limiter.record(customer_id)
-        self._sink(customer_id, text)
+    def _send(
+        self,
+        customer_id: str,
+        text: str,
+        reservation: RateLimitReservation,
+    ) -> None:
+        """Send once, committing quota on success or releasing it on failure."""
+        try:
+            self._sink(customer_id, text)
+        except BaseException:
+            self._limiter.cancel(reservation)
+            raise
+        self._limiter.commit(reservation)
         self._audit.record(customer_id, "message_sent", text)

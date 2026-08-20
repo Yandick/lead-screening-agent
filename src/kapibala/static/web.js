@@ -1,6 +1,7 @@
 const state = {
   customer: null,
   activeTab: "history",
+  pendingRefreshTimer: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -61,8 +62,12 @@ function render() {
   $("#streak-value").textContent = customer.state.anomaly_count;
   $("#intent-value").textContent = customer.state.last_estimation?.intent || "none";
   $("#pending-value").textContent = customer.followups.length;
-  renderConversation(customer.history);
+  renderConversation([
+    ...customer.history,
+    ...(customer.buffered_messages || []).map((turn) => ({ ...turn, buffered: true })),
+  ]);
   renderDetail(customer);
+  schedulePendingRefresh(customer);
 }
 
 function renderConversation(history) {
@@ -81,7 +86,7 @@ function renderConversation(history) {
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     const role = document.createElement("small");
-    role.textContent = turn.role;
+    role.textContent = turn.buffered ? `${turn.role} · 待聚合` : turn.role;
     const content = document.createElement("span");
     content.textContent = turn.content;
     bubble.append(role, content);
@@ -89,6 +94,16 @@ function renderConversation(history) {
     log.append(row);
   }
   log.scrollTop = log.scrollHeight;
+}
+
+function schedulePendingRefresh(customer) {
+  clearTimeout(state.pendingRefreshTimer);
+  const buffer = customer.reply_buffer;
+  if (!buffer?.buffered) return;
+  state.pendingRefreshTimer = setTimeout(
+    refreshCustomer,
+    Math.max(250, (buffer.due_in_seconds + 0.25) * 1000)
+  );
 }
 
 function detailRow(title, text) {
@@ -108,8 +123,15 @@ function renderDetail(customer) {
   list.className = "detail-list";
   let rows = [];
   if (state.activeTab === "history") {
-    rows = customer.history.map((turn, index) =>
-      detailRow(`${index + 1} · ${turn.role}`, turn.content)
+    const turns = [
+      ...customer.history,
+      ...(customer.buffered_messages || []).map((turn) => ({ ...turn, buffered: true })),
+    ];
+    rows = turns.map((turn, index) =>
+      detailRow(
+        `${index + 1} · ${turn.role}${turn.buffered ? " · 待聚合" : ""}`,
+        turn.content
+      )
     );
   } else if (state.activeTab === "followups") {
     rows = customer.followups.map((item, index) =>
@@ -143,33 +165,16 @@ $("#message-form").addEventListener("submit", async (event) => {
     }
     const result = payload.result;
     if (result.note === "invalid_input") notice(`输入无效 · ${result.input_error}`, true);
+    else if (result.note === "buffered") {
+      const aggregation = payload.aggregation;
+      notice(
+        `已加入聚合 · 共 ${aggregation.pending_count} 条 · 约 ${Math.ceil(aggregation.due_in_seconds)}s 后处理`
+      );
+    }
     else if (result.note.startsWith("silent")) notice("会话处于终态，本轮保持静默");
     else if (result.note === "fail_closed") notice("模型调用失败，本轮未执行动作", true);
     else notice(result.executions.some((item) => item.executed) ? "处理完成" : "本轮未执行动作");
     $("#message-input").value = "";
-  } catch (error) {
-    notice(error.message, true);
-  } finally {
-    setBusy(button, false);
-  }
-});
-
-$("#followup-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = event.submitter;
-  setBusy(button, true);
-  try {
-    const payload = await request("/api/followups", {
-      method: "POST",
-      body: JSON.stringify({
-        customer_id: customerId(),
-        delay_seconds: Number($("#followup-delay").value),
-        context: $("#followup-context").value,
-      }),
-    });
-    state.customer = payload.customer;
-    render();
-    notice(payload.execution.executed ? "跟进已标记，本轮未回复" : `未标记 · ${payload.execution.reason}`);
   } catch (error) {
     notice(error.message, true);
   } finally {
@@ -206,6 +211,23 @@ $("#reactivate").addEventListener("click", async (event) => {
   }
 });
 
+$("#reset-session").addEventListener("click", async (event) => {
+  setBusy(event.currentTarget, true);
+  try {
+    state.customer = await request("/api/reset", {
+      method: "POST",
+      body: JSON.stringify({ customer_id: customerId() }),
+    });
+    render();
+    $("#message-input").value = "";
+    notice("已新建空白会话");
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    setBusy(event.currentTarget, false);
+  }
+});
+
 $("#queue-script").addEventListener("click", async () => {
   try {
     const payload = await request("/api/script", {
@@ -213,9 +235,14 @@ $("#queue-script").addEventListener("click", async () => {
       body: JSON.stringify({
         intent: $("#fake-intent").value,
         dissatisfied: $("#fake-dissatisfied").checked,
+        followup_requested: $("#fake-followup").checked,
       }),
     });
-    notice(`已预排 · ${payload.queued.intent}`);
+    notice(
+      payload.queued.followup_requested
+        ? `已预排 · ${payload.queued.intent} · 稍后跟进`
+        : `已预排 · ${payload.queued.intent}`
+    );
   } catch (error) {
     notice(error.message, true);
   }

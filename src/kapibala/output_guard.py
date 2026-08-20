@@ -21,8 +21,8 @@ from dataclasses import dataclass
 #: 回复中出现它即判定为系统提示词泄露。
 CANARY_TOKEN = "ZQX9182-INTERNAL"
 
-#: 命中任一检查后的泛化安全回复
-SAFE_FALLBACK = "这个问题我帮您转给专人处理，请稍候。"
+#: 命中任一检查后的泛化安全回复；不得声称执行了实际不存在的业务动作。
+SAFE_FALLBACK = "抱歉，我暂时无法回答这个问题。您可以换个方式描述需求。"
 
 #: 回复最大长度（字符）
 MAX_REPLY_LENGTH = 500

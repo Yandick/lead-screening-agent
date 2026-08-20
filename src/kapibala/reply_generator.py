@@ -1,6 +1,6 @@
 """回复生成器接口与模板实现。
 
-回复生成与意图分类是两次独立调用（plan2 第 4 节）；生成 prompt 不含任何
+回复生成与结构化分类职责分离（plan2 第 4 节）；生成 prompt 不含任何
 内部机密。M2 先用模板生成器打通管道，R2 增加 LLM 生成实现
 （gemini_reply.GeminiReplyGenerator，其提示词中埋入 output_guard.CANARY_TOKEN 哨兵）。
 """
@@ -15,7 +15,6 @@ from kapibala.schemas import Estimation, ReplyKind
 _TEMPLATES = {
     ReplyKind.SOOTHE: "非常抱歉给您带来了不好的体验，您反馈的问题我已经记下了，我们会尽快跟进改进。",
     ReplyKind.REDIRECT: "哈哈这个我可答不上来。还是说回正事——您对我们的产品还有什么想了解的吗？",
-    ReplyKind.CONFIRM_FOLLOWUP: "好的，那不打扰您了，我们稍后再联系，祝您顺利！",
     ReplyKind.PITCH: "谢谢您的关注。您最想了解哪方面？我会先核实相关信息再回复。",
     ReplyKind.ANSWER: "这个问题需要核对已确认的产品信息，我先帮您确认，避免给出不准确的答复。",
     ReplyKind.GENERIC: "收到。方便说说您主要想了解哪方面吗？我给您针对性介绍。",
@@ -23,6 +22,9 @@ _TEMPLATES = {
 
 #: 跟进触达话术（run_followups 使用）
 FOLLOWUP_TEMPLATE = "您好，之前和您聊过我们的方案，想跟进一下您这边考虑得怎么样了？"
+
+#: 转人工状态切换时发送的受控通知。该文本不经过 LLM 生成。
+HANDOFF_NOTICE = "已为您转接人工同事，后续将由人工跟进。"
 
 
 class ReplyGenerator(ABC):

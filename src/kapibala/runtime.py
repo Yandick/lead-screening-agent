@@ -96,6 +96,11 @@ class ConversationStore:
         with self._lock:
             return tuple(self._histories.get(customer_id, ()))
 
+    def reset(self, customer_id: str) -> None:
+        """Remove one customer's conversation history."""
+        with self._lock:
+            self._histories.pop(customer_id, None)
+
     def _append(self, customer_id: str, role: ConversationRole, content: str) -> None:
         with self._lock:
             history = self._histories.setdefault(

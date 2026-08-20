@@ -21,7 +21,7 @@ from kapibala.executor import ExecutionResult, Executor
 from kapibala.followup import Followup, FollowupQueue
 from kapibala.human_handoff import is_explicit_human_request
 from kapibala.policy import PolicyDecision, decide
-from kapibala.reply_generator import FOLLOWUP_TEMPLATE, ReplyGenerator
+from kapibala.reply_generator import FOLLOWUP_TEMPLATE, HANDOFF_NOTICE, ReplyGenerator
 from kapibala.runtime import (
     ConversationStore,
     ConversationTurn,
@@ -31,6 +31,9 @@ from kapibala.runtime import (
 )
 from kapibala.schemas import Action, Estimation, ReplyKind
 from kapibala.state_machine import SessionState, StateMachine, Transition
+
+DEFAULT_FOLLOWUP_DELAY_SECONDS = 3600.0
+
 
 @dataclass
 class ProcessResult:
@@ -60,6 +63,7 @@ class ScreeningAgent:
         runtime_config: RuntimeConfig | None = None,
         conversation_store: ConversationStore | None = None,
         business_context: BusinessContext | None = None,
+        followup_delay_seconds: float = DEFAULT_FOLLOWUP_DELAY_SECONDS,
     ) -> None:
         self._adapter = adapter
         self._generator = generator
@@ -73,6 +77,7 @@ class ScreeningAgent:
             self._runtime_config.max_history_turns
         )
         self._business_context = business_context or BusinessContext()
+        self._followup_delay_seconds = followup_delay_seconds
 
     @property
     def conversation_store(self) -> ConversationStore:
@@ -80,14 +85,29 @@ class ScreeningAgent:
         return self._history
 
     def pending_followups(self, customer_id: str | None = None) -> tuple[Followup, ...]:
-        """Return a read-only snapshot of queued trusted-operator follow-ups."""
+        """Return a read-only snapshot of queued follow-up markers."""
         return self._followups.snapshot(customer_id)
+
+    def validate_message(self, customer_id: object, text: object) -> RuntimeInput:
+        """Validate and normalize one inbound message without changing state."""
+        return RuntimeInput.validate(customer_id, text, self._runtime_config)
+
+    def reply_wait_seconds(self, customer_id: str) -> float:
+        """Return the advisory delay until another customer-visible send."""
+        return self._executor.reply_wait_seconds(customer_id)
+
+    def reset_session(self, customer_id: str) -> None:
+        """Start a clean demo session for one normalized customer ID."""
+        self._sm.reset(customer_id)
+        self._history.reset(customer_id)
+        self._followups.reset(customer_id)
+        self._executor.reset_customer(customer_id)
+        self._audit.reset(customer_id)
+        self._audit.record(customer_id, "session_reset", "new demo session")
 
     def handle_message(self, customer_id: object, text: object) -> ProcessResult:
         try:
-            runtime_input = RuntimeInput.validate(
-                customer_id, text, self._runtime_config
-            )
+            runtime_input = self.validate_message(customer_id, text)
         except InputValidationError as exc:
             return ProcessResult(note="invalid_input", input_error=exc.reason)
 
@@ -111,13 +131,13 @@ class ScreeningAgent:
         if is_explicit_human_request(text):
             transition = Transition(escalated_now=True)
             decision = PolicyDecision(actions=(Action.ESCALATE_TO_HUMAN,))
-            execution = self._executor.execute(customer_id, Action.ESCALATE_TO_HUMAN)
-            return ProcessResult(
+            result = ProcessResult(
                 note="ok",
                 transition=transition,
                 decision=decision,
-                executions=[execution],
             )
+            self._escalate_and_notify(customer_id, result)
+            return result
 
         # LLM 结构化状态估计；任何失败 fail-closed：不发客户可见消息
         try:
@@ -149,41 +169,42 @@ class ScreeningAgent:
                 if execution.executed and execution.reason == "sent":
                     self._history.append_assistant(customer_id, reply_text)
             elif action is Action.SCHEDULE_FOLLOWUP:
-                self._audit.record(
-                    customer_id,
-                    "action_rejected",
-                    "followup_requires_trusted_operator",
+                followup = Followup(
+                    customer_id=customer_id,
+                    due_at=self._clock() + self._followup_delay_seconds,
+                    context=text,
                 )
                 result.executions.append(
-                    ExecutionResult(False, "trusted_operator_required")
+                    self._executor.execute(
+                        customer_id,
+                        Action.SCHEDULE_FOLLOWUP,
+                        followup=followup,
+                    )
                 )
+            elif action is Action.ESCALATE_TO_HUMAN:
+                self._escalate_and_notify(customer_id, result)
             else:
                 result.executions.append(self._executor.execute(customer_id, action))
         return result
 
-    def schedule_followup(
-        self,
-        customer_id: object,
-        delay_seconds: object,
-        context: object = "",
-    ) -> tuple[Followup, ExecutionResult]:
-        """Create a follow-up only from a trusted operator command.
-
-        Customer text never reaches this entry point. Scheduling queues a marker
-        through the existing executor and does not generate or send a reply.
-        """
-        followup = Followup.from_operator(
-            customer_id,
-            delay_seconds,
-            context,
-            clock=self._clock,
+    def _escalate_and_notify(
+        self, customer_id: str, result: ProcessResult
+    ) -> None:
+        """Commit escalation, attempt one rate-limited notice, then stay silent."""
+        result.executions.append(
+            self._executor.execute(customer_id, Action.ESCALATE_TO_HUMAN)
         )
-        execution = self._executor.execute(
-            followup.customer_id,
-            Action.SCHEDULE_FOLLOWUP,
-            followup=followup,
-        )
-        return followup, execution
+        result.reply_text = HANDOFF_NOTICE
+        try:
+            notice = self._executor.notify_handoff(customer_id)
+        except Exception as exc:
+            notice = ExecutionResult(False, "delivery_error")
+            self._audit.record(
+                customer_id, "handoff_notice_delivery_error", type(exc).__name__
+            )
+        result.executions.append(notice)
+        if notice.executed and notice.reason == "sent":
+            self._history.append_assistant(customer_id, HANDOFF_NOTICE)
 
     def run_followups(self) -> list[tuple[Followup, ExecutionResult]]:
         """触发到期跟进：生成 -> output_guard -> 状态门禁 -> 限流 -> 统一发送。"""

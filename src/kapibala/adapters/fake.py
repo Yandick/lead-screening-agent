@@ -30,6 +30,10 @@ class FakeAdapter(LLMAdapter):
     def script(self, item: Estimation | Exception) -> None:
         self._queue.append(item)
 
+    def clear_script(self) -> None:
+        """Discard queued fake responses when the demo starts a new session."""
+        self._queue.clear()
+
     def estimate(self, message: str) -> Estimation:
         self.calls.append(message)
         if self._queue:

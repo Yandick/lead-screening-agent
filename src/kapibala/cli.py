@@ -2,8 +2,6 @@
 
 命令：
   msg <customer_id> <text>   处理一条客户消息，显示判定摘要、状态变化、动作
-  schedule_followup <customer_id> <delay_seconds> [context]
-                             可信人工标记稍后跟进，本轮不回复
   reactivate <customer_id>   人工恢复 active
   show_state <customer_id>   查看状态机与计数器
   run_followups              触发到期跟进
@@ -21,22 +19,23 @@ from kapibala.agent import ProcessResult, ScreeningAgent
 from kapibala.adapters.base import LLMError
 from kapibala.adapters.fake import FakeAdapter
 from kapibala.audit import AuditLog
+from kapibala.debounce import ReplyIntervalBuffer
 from kapibala.executor import Executor
-from kapibala.followup import FollowupQueue, FollowupValidationError
+from kapibala.followup import FollowupQueue
+from kapibala.human_handoff import is_explicit_human_request
 from kapibala.rate_limiter import SlidingWindowRateLimiter
 from kapibala.reply_generator import TemplateReplyGenerator
+from kapibala.runtime import InputValidationError
 from kapibala.schemas import Estimation, Intent
-from kapibala.state_machine import StateMachine
+from kapibala.state_machine import SessionState, StateMachine
 
 HELP_TEXT = """可用命令：
-  msg <customer_id> <text>   发送一条客户消息（连发会聚合，静默几秒后统一处理）
-  schedule_followup <customer_id> <delay_seconds> [context]
-                             可信人工标记稍后跟进，本轮不回复
+  msg <customer_id> <text>   发送客户消息（回复间隔内的消息会合并处理）
   reactivate <customer_id>   人工恢复 active
   show_state <customer_id>   查看状态机与计数器
   run_followups              触发到期跟进
   script <k=v ...>           预排下一次 LLM 判定（fake 模式），如：
-                             script intent=off_topic dissatisfied=true
+                             script intent=other followup_requested=true
                              script error
   reset <customer_id>        清空该客户状态
   help                       显示本帮助
@@ -78,30 +77,44 @@ class CLI:
             cid, text = args[0], args[1]
             if self._debouncer is None:
                 return self._format_result(cid, self._agent.handle_message(cid, text))
+            if isinstance(self._debouncer, ReplyIntervalBuffer):
+                try:
+                    inbound = self._agent.validate_message(cid, text)
+                except InputValidationError:
+                    return self._format_result(
+                        cid, self._agent.handle_message(cid, text)
+                    )
+                if self._sm.get(inbound.customer_id).session is not SessionState.ACTIVE:
+                    self._cancel_buffer(inbound.customer_id)
+                    return self._format_result(
+                        inbound.customer_id,
+                        self._agent.handle_message(
+                            inbound.customer_id, inbound.message
+                        ),
+                    )
+                submission = self._debouncer.submit(
+                    inbound.customer_id,
+                    inbound.message,
+                    force=is_explicit_human_request(inbound.message),
+                )
+                if not submission.buffered:
+                    timer = self._timers.pop(inbound.customer_id, None)
+                    if timer is not None:
+                        timer.cancel()
+                    assert isinstance(submission.result, ProcessResult)
+                    return self._format_result(inbound.customer_id, submission.result)
+                self._schedule_flush(
+                    inbound.customer_id, submission.due_in_seconds
+                )
+                return (
+                    f"[{inbound.customer_id}] 已接收（{submission.pending_count} 条"
+                    f"待聚合，约 {submission.due_in_seconds:.0f}s 后统一处理）。"
+                )
             count = self._debouncer.feed(cid, text)
             self._schedule_flush(cid)
             return (
                 f"[{cid}] 已接收（{count} 条待聚合，静默 "
                 f"{self._debounce_window:.0f}s 后统一处理）。"
-            )
-        if cmd == "schedule_followup" and len(args) == 2:
-            cid = args[0]
-            schedule_args = args[1].split(maxsplit=1)
-            try:
-                delay_seconds = float(schedule_args[0])
-                context = schedule_args[1] if len(schedule_args) == 2 else ""
-                followup, execution = self._agent.schedule_followup(
-                    cid, delay_seconds, context
-                )
-            except FollowupValidationError as exc:
-                return f"跟进参数非法（{exc.reason}）。"
-            except ValueError:
-                return "跟进参数非法：delay_seconds 必须是有限的非负数。"
-            if not execution.executed:
-                return f"[{followup.customer_id}] 跟进未标记（{execution.reason}）。"
-            return (
-                f"[{followup.customer_id}] 已由人工标记跟进，"
-                f"{delay_seconds:g} 秒后到期；本轮未回复。"
             )
         if cmd == "reactivate" and len(args) >= 1:
             self._sm.reactivate(args[0])
@@ -121,22 +134,34 @@ class CLI:
         if cmd == "script" and args:
             return self._handle_script(" ".join(args))
         if cmd == "reset" and len(args) >= 1:
-            self._sm.reset(args[0])
-            return f"[{args[0]}] 状态已清空。"
+            customer_id = args[0].strip()
+            self._cancel_buffer(customer_id)
+            self._agent.reset_session(customer_id)
+            if isinstance(self._adapter, FakeAdapter):
+                self._adapter.clear_script()
+            return f"[{customer_id}] 已新建空白会话。"
         if cmd == "help":
             return HELP_TEXT
         if cmd in ("quit", "exit"):
             raise SystemExit(0)
         return "未知命令，输入 help 查看用法。"
 
-    def _schedule_flush(self, customer_id: str) -> None:
+    def _schedule_flush(
+        self, customer_id: str, delay_seconds: float | None = None
+    ) -> None:
         import threading
 
         old = self._timers.pop(customer_id, None)
         if old is not None:
             old.cancel()
         timer = threading.Timer(
-            self._debounce_window, self._flush_and_print, args=(customer_id,)
+            (
+                self._debounce_window
+                if delay_seconds is None
+                else max(0.001, delay_seconds)
+            ),
+            self._flush_and_print,
+            args=(customer_id,),
         )
         timer.daemon = True
         timer.start()
@@ -147,6 +172,18 @@ class CLI:
         result = self._debouncer.flush_customer(customer_id)
         if result is not None:
             self._printer(self._format_result(result[0], result[1]))
+        elif isinstance(self._debouncer, ReplyIntervalBuffer):
+            if self._debouncer.pending_count(customer_id):
+                self._schedule_flush(
+                    customer_id, self._debouncer.due_in(customer_id)
+                )
+
+    def _cancel_buffer(self, customer_id: str) -> None:
+        timer = self._timers.pop(customer_id, None)
+        if timer is not None:
+            timer.cancel()
+        if self._debouncer is not None and hasattr(self._debouncer, "reset"):
+            self._debouncer.reset(customer_id)
 
     def drain(self) -> None:
         """退出前立即处理所有待聚合批次。"""
@@ -154,6 +191,10 @@ class CLI:
             timer.cancel()
         self._timers.clear()
         if self._debouncer is None:
+            return
+        if isinstance(self._debouncer, ReplyIntervalBuffer):
+            for cid in self._debouncer.pending_customers():
+                self._debouncer.reset(cid)
             return
         for cid in self._debouncer.pending_customers():
             self._flush_and_print(cid)
@@ -166,12 +207,19 @@ class CLI:
             return "已预排：下一次估计抛出 LLMError（演示 fail-closed）。"
         kv = dict(pair.split("=", 1) for pair in spec.split() if "=" in pair)
         try:
-            unknown = set(kv) - {"intent", "dissatisfied"}
+            unknown = set(kv) - {
+                "intent",
+                "dissatisfied",
+                "followup_requested",
+            }
             if unknown:
                 raise ValueError(f"未知字段：{', '.join(sorted(unknown))}")
             est = Estimation(
                 intent=Intent(kv.get("intent", "other")),
                 dissatisfied=kv.get("dissatisfied", "false").lower() == "true",
+                followup_requested=(
+                    kv.get("followup_requested", "false").lower() == "true"
+                ),
             )
         except ValueError as exc:
             return f"script 参数非法：{exc}"
@@ -217,7 +265,10 @@ class CLI:
     def _format_estimation(est: Estimation | None) -> str:
         if est is None:
             return "（无）"
-        return f"intent={est.intent.value} dissatisfied={est.dissatisfied}"
+        return (
+            f"intent={est.intent.value} dissatisfied={est.dissatisfied} "
+            f"followup_requested={est.followup_requested}"
+        )
 
 
 def build_cli(sink=None) -> CLI:
@@ -246,11 +297,19 @@ def build_cli(sink=None) -> CLI:
         adapter, generator, executor, sm, audit, followups,
         clock=clock,
     )
-    from kapibala.debounce import MessageDebouncer
-
-    debounce_window = float(os.environ.get("DEBOUNCE_SECONDS", "3"))
-    debouncer = MessageDebouncer(agent.handle_message, clock=clock, window_seconds=debounce_window)
-    return CLI(agent, sm, adapter, audit, debouncer=debouncer, debounce_window=debounce_window), mode
+    message_buffer = ReplyIntervalBuffer(
+        agent.handle_message,
+        agent.reply_wait_seconds,
+        clock=clock,
+    )
+    return CLI(
+        agent,
+        sm,
+        adapter,
+        audit,
+        debouncer=message_buffer,
+        debounce_window=60.0,
+    ), mode
 
 
 def main() -> None:

@@ -58,6 +58,10 @@
           <input id="fake-dissatisfied" type="checkbox">
           <span>dissatisfied</span>
         </label>
+        <label class="check-field">
+          <input id="fake-followup" type="checkbox">
+          <span>followup requested</span>
+        </label>
         <button id="queue-script" class="secondary" type="button">预排判定</button>
         <button id="queue-error" class="secondary danger-text" type="button">预排失败</button>
       </div>
@@ -69,7 +73,10 @@
           <p class="eyebrow">OPERATOR</p>
           <h2 id="inspector-title">运行状态</h2>
         </div>
-        <button id="refresh" class="secondary" type="button">刷新</button>
+        <div class="header-actions">
+          <button id="refresh" class="secondary" type="button">刷新</button>
+          <button id="reset-session" class="secondary danger-text" type="button">新建会话</button>
+        </div>
       </div>
 
       <div class="status-grid">
@@ -80,13 +87,6 @@
       </div>
 
       <div class="operator-actions">
-        <form id="followup-form">
-          <div class="action-fields">
-            <label><span>延迟（秒）</span><input id="followup-delay" type="number" min="0" step="1" value="60" required></label>
-            <label><span>上下文</span><input id="followup-context" maxlength="200" placeholder="operator note"></label>
-          </div>
-          <button class="secondary" type="submit">标记跟进</button>
-        </form>
         <div class="action-row">
           <button id="run-followups" class="secondary" type="button">执行到期跟进</button>
           <button id="reactivate" class="secondary" type="button">人工重新激活</button>

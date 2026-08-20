@@ -9,19 +9,22 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
-from threading import RLock
+from threading import RLock, Timer
 from urllib.parse import parse_qs, urlparse
 
 from kapibala.agent import ProcessResult, ScreeningAgent
 from kapibala.adapters.base import LLMError
 from kapibala.adapters.fake import FakeAdapter
 from kapibala.audit import AuditLog
+from kapibala.debounce import ReplyIntervalBuffer
 from kapibala.executor import Executor
-from kapibala.followup import FollowupValidationError, FollowupQueue
+from kapibala.followup import FollowupQueue
+from kapibala.human_handoff import is_explicit_human_request
 from kapibala.rate_limiter import SlidingWindowRateLimiter
 from kapibala.reply_generator import TemplateReplyGenerator
+from kapibala.runtime import InputValidationError
 from kapibala.schemas import Estimation, Intent
-from kapibala.state_machine import StateMachine
+from kapibala.state_machine import SessionState, StateMachine
 
 MAX_REQUEST_BYTES = 64 * 1024
 
@@ -45,9 +48,18 @@ class WebApplication:
     audit: AuditLog
     mode: str
     clock: object = time.monotonic
+    message_buffer: ReplyIntervalBuffer | None = None
+    auto_flush: bool = True
 
     def __post_init__(self) -> None:
         self._lock = RLock()
+        self._buffer_timers: dict[str, Timer] = {}
+        if self.message_buffer is None:
+            self.message_buffer = ReplyIntervalBuffer(
+                self.agent.handle_message,
+                self.agent.reply_wait_seconds,
+                clock=self.clock,
+            )
 
     @property
     def is_fake(self) -> bool:
@@ -58,36 +70,63 @@ class WebApplication:
 
     def process_message(self, payload: dict[str, object]) -> dict[str, object]:
         with self._lock:
-            result = self.agent.handle_message(
-                payload.get("customer_id"), payload.get("message")
-            )
-            customer_id = self._normalized_id(payload.get("customer_id"), required=False)
+            raw_customer_id = payload.get("customer_id")
+            raw_message = payload.get("message")
+            try:
+                inbound = self.agent.validate_message(raw_customer_id, raw_message)
+            except InputValidationError:
+                result = self.agent.handle_message(raw_customer_id, raw_message)
+                customer_id = self._normalized_id(raw_customer_id, required=False)
+                return {
+                    "result": self._serialize_result(result),
+                    "aggregation": self._aggregation_status(customer_id),
+                    "customer": None,
+                }
+
+            customer_id = inbound.customer_id
+            session = self.state_machine.get(customer_id).session
+            if session is not SessionState.ACTIVE:
+                self._clear_buffer_locked(customer_id)
+                result = self.agent.handle_message(customer_id, inbound.message)
+                submission = None
+            else:
+                submission = self.message_buffer.submit(
+                    customer_id,
+                    inbound.message,
+                    force=is_explicit_human_request(inbound.message),
+                )
+                if submission.buffered:
+                    self.audit.record(
+                        customer_id,
+                        "message_buffered",
+                        f"pending={submission.pending_count}",
+                    )
+                    self._schedule_buffer_flush_locked(
+                        customer_id, submission.due_in_seconds
+                    )
+                    result = ProcessResult(note="buffered")
+                else:
+                    assert isinstance(submission.result, ProcessResult)
+                    result = submission.result
+
+            if result.transition.escalated_now or result.transition.closed_now:
+                self._clear_buffer_locked(customer_id)
             return {
                 "result": self._serialize_result(result),
+                "aggregation": (
+                    {
+                        "buffered": submission.buffered,
+                        "pending_count": submission.pending_count,
+                        "due_in_seconds": submission.due_in_seconds,
+                    }
+                    if submission is not None
+                    else self._aggregation_status(customer_id)
+                ),
                 "customer": (
                     self.customer(customer_id)
                     if customer_id and result.note != "invalid_input"
                     else None
                 ),
-            }
-
-    def schedule_followup(self, payload: dict[str, object]) -> dict[str, object]:
-        with self._lock:
-            try:
-                followup, execution = self.agent.schedule_followup(
-                    payload.get("customer_id"),
-                    payload.get("delay_seconds"),
-                    payload.get("context", ""),
-                )
-            except FollowupValidationError as exc:
-                raise WebRequestError(exc.reason) from exc
-            return {
-                "followup": self._serialize_followup(followup),
-                "execution": {
-                    "executed": execution.executed,
-                    "reason": execution.reason,
-                },
-                "customer": self.customer(followup.customer_id),
             }
 
     def run_followups(self) -> dict[str, object]:
@@ -114,6 +153,16 @@ class WebApplication:
             self.audit.record(customer_id, "reactivated", "by human operator")
             return self.customer(customer_id)
 
+    def reset_session(self, payload: dict[str, object]) -> dict[str, object]:
+        """Clear all per-customer demo state and return a fresh active session."""
+        customer_id = self._normalized_id(payload.get("customer_id"))
+        with self._lock:
+            self._clear_buffer_locked(customer_id)
+            self.agent.reset_session(customer_id)
+            if self.is_fake:
+                self.adapter.clear_script()
+            return self.customer(customer_id)
+
     def script(self, payload: dict[str, object]) -> dict[str, object]:
         if not self.is_fake:
             raise WebRequestError(
@@ -127,9 +176,13 @@ class WebApplication:
                 dissatisfied = payload.get("dissatisfied", False)
                 if not isinstance(dissatisfied, bool):
                     raise ValueError("dissatisfied must be boolean")
+                followup_requested = payload.get("followup_requested", False)
+                if not isinstance(followup_requested, bool):
+                    raise ValueError("followup_requested must be boolean")
                 estimation = Estimation(
                     intent=Intent(payload.get("intent", Intent.OTHER.value)),
                     dissatisfied=dissatisfied,
+                    followup_requested=followup_requested,
                 )
             except (TypeError, ValueError) as exc:
                 raise WebRequestError(str(exc)) from exc
@@ -138,6 +191,7 @@ class WebApplication:
                 "queued": {
                     "intent": estimation.intent.value,
                     "dissatisfied": estimation.dissatisfied,
+                    "followup_requested": estimation.followup_requested,
                 }
             }
 
@@ -146,6 +200,7 @@ class WebApplication:
         with self._lock:
             state = self.state_machine.get(normalized_id)
             history = self.agent.conversation_store.get(normalized_id)
+            buffered_messages = self.message_buffer.pending_messages(normalized_id)
             return {
                 "customer_id": normalized_id,
                 "state": {
@@ -155,6 +210,9 @@ class WebApplication:
                         {
                             "intent": state.last_estimation.intent.value,
                             "dissatisfied": state.last_estimation.dissatisfied,
+                            "followup_requested": (
+                                state.last_estimation.followup_requested
+                            ),
                         }
                         if state.last_estimation is not None
                         else None
@@ -164,6 +222,11 @@ class WebApplication:
                     {"role": turn.role.value, "content": turn.content}
                     for turn in history
                 ],
+                "buffered_messages": [
+                    {"role": "customer", "content": message}
+                    for message in buffered_messages
+                ],
+                "reply_buffer": self._aggregation_status(normalized_id),
                 "history_limit": self.agent.conversation_store.max_turns,
                 "followups": [
                     self._serialize_followup(item)
@@ -178,6 +241,20 @@ class WebApplication:
                     for event in self.audit.events_for(normalized_id)
                 ],
             }
+
+    def flush_due_messages(self) -> list[dict[str, object]]:
+        """Synchronously flush due reply-interval batches (test/demo hook)."""
+        with self._lock:
+            outcomes = []
+            for customer_id, result in self.message_buffer.flush_due():
+                self.audit.record(customer_id, "message_batch_flushed")
+                outcomes.append(
+                    {
+                        "customer_id": customer_id,
+                        "result": self._serialize_result(result),
+                    }
+                )
+            return outcomes
 
     def followups(self, customer_id: object | None = None) -> list[dict[str, object]]:
         normalized_id = (
@@ -197,6 +274,60 @@ class WebApplication:
             "context": followup.context,
         }
 
+    def _aggregation_status(self, customer_id: str) -> dict[str, object]:
+        if not customer_id:
+            return {
+                "buffered": False,
+                "pending_count": 0,
+                "due_in_seconds": 0.0,
+            }
+        pending_count = self.message_buffer.pending_count(customer_id)
+        return {
+            "buffered": pending_count > 0,
+            "pending_count": pending_count,
+            "due_in_seconds": self.message_buffer.due_in(customer_id),
+        }
+
+    def _schedule_buffer_flush_locked(
+        self, customer_id: str, due_in_seconds: float
+    ) -> None:
+        if not self.auto_flush:
+            return
+        old_timer = self._buffer_timers.pop(customer_id, None)
+        if old_timer is not None:
+            old_timer.cancel()
+        timer = Timer(
+            max(0.001, due_in_seconds),
+            self._flush_buffered_customer,
+            args=(customer_id,),
+        )
+        timer.daemon = True
+        timer.start()
+        self._buffer_timers[customer_id] = timer
+
+    def _flush_buffered_customer(self, customer_id: str) -> None:
+        with self._lock:
+            self._buffer_timers.pop(customer_id, None)
+            try:
+                flushed = self.message_buffer.flush_customer(customer_id)
+            except Exception as exc:
+                self.audit.record(
+                    customer_id, "message_batch_flush_error", type(exc).__name__
+                )
+                return
+            if flushed is not None:
+                self.audit.record(customer_id, "message_batch_flushed")
+            elif self.message_buffer.pending_count(customer_id):
+                self._schedule_buffer_flush_locked(
+                    customer_id, self.message_buffer.due_in(customer_id)
+                )
+
+    def _clear_buffer_locked(self, customer_id: str) -> None:
+        timer = self._buffer_timers.pop(customer_id, None)
+        if timer is not None:
+            timer.cancel()
+        self.message_buffer.reset(customer_id)
+
     @staticmethod
     def _serialize_result(result: ProcessResult) -> dict[str, object]:
         return {
@@ -206,6 +337,7 @@ class WebApplication:
                 {
                     "intent": result.estimation.intent.value,
                     "dissatisfied": result.estimation.dissatisfied,
+                    "followup_requested": result.estimation.followup_requested,
                 }
                 if result.estimation is not None
                 else None
@@ -312,9 +444,9 @@ def make_handler(application: WebApplication):
                 payload = self._read_json()
                 routes = {
                     "/api/messages": application.process_message,
-                    "/api/followups": application.schedule_followup,
                     "/api/followups/run": lambda _payload: application.run_followups(),
                     "/api/reactivate": application.reactivate,
+                    "/api/reset": application.reset_session,
                     "/api/script": application.script,
                 }
                 handler = routes.get(parsed.path)

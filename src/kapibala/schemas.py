@@ -34,7 +34,6 @@ class ReplyKind(str, Enum):
 
     SOOTHE = "soothe"  # 安抚 + 回应其意图
     REDIRECT = "redirect"  # 礼貌拉回话题
-    CONFIRM_FOLLOWUP = "confirm_followup"  # 确认稍后跟进
     PITCH = "pitch"  # 推进转化
     ANSWER = "answer"  # 解答问题
     GENERIC = "generic"  # 澄清式回应
@@ -42,11 +41,14 @@ class ReplyKind(str, Enum):
 
 @dataclass(frozen=True)
 class Estimation:
-    """两次独立 LLM 分类均通过校验后合并的业务结果。
+    """三个独立 LLM 分类均通过校验后合并的业务结果。
 
     - intent: 五类意图之一；
     - dissatisfied: 正交情绪信号，不得从 intent 推导；
+    - followup_requested: 客户是否明确要求稍后再联系；只作为策略输入，
+      不能直接执行动作；
     """
 
     intent: Intent
     dissatisfied: bool = False
+    followup_requested: bool = False

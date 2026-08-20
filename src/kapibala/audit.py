@@ -33,3 +33,9 @@ class AuditLog:
 
     def events_for(self, customer_id: str) -> tuple[AuditEvent, ...]:
         return tuple(e for e in self._events if e.customer_id == customer_id)
+
+    def reset(self, customer_id: str) -> None:
+        """Remove one customer's audit trail when starting a new demo session."""
+        self._events = [
+            event for event in self._events if event.customer_id != customer_id
+        ]
