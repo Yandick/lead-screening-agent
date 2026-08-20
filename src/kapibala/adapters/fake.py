@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from kapibala.adapters.base import LLMAdapter, LLMError
+from kapibala.context import ClassificationRequest
 from kapibala.schemas import Estimation
 
 
@@ -24,6 +25,7 @@ class FakeAdapter(LLMAdapter):
         self._queue: list[Estimation | Exception] = []
         self._responder = responder
         self.calls: list[str] = []  # 记录被调用的消息，便于断言"静默时未调用 LLM"
+        self.requests: list[ClassificationRequest] = []
 
     def script(self, item: Estimation | Exception) -> None:
         self._queue.append(item)
@@ -38,3 +40,7 @@ class FakeAdapter(LLMAdapter):
         if self._responder is not None:
             return self._responder(message)
         raise LLMError("fake adapter: no scripted response")
+
+    def estimate_request(self, request: ClassificationRequest) -> Estimation:
+        self.requests.append(request)
+        return self.estimate(request.message)

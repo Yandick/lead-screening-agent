@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from kapibala import output_guard
 from kapibala.adapters.base import LLMAdapter, LLMError
 from kapibala.audit import AuditLog
+from kapibala.context import BusinessContext, ClassificationRequest, ReplyRequest
 from kapibala.executor import ExecutionResult, Executor
 from kapibala.followup import Followup, FollowupQueue
 from kapibala.human_handoff import is_explicit_human_request
@@ -23,6 +24,7 @@ from kapibala.policy import PolicyDecision, decide
 from kapibala.reply_generator import FOLLOWUP_TEMPLATE, ReplyGenerator
 from kapibala.runtime import (
     ConversationStore,
+    ConversationTurn,
     InputValidationError,
     RuntimeConfig,
     RuntimeInput,
@@ -62,6 +64,7 @@ class ScreeningAgent:
         followup_delay: float = DEFAULT_FOLLOWUP_DELAY,
         runtime_config: RuntimeConfig | None = None,
         conversation_store: ConversationStore | None = None,
+        business_context: BusinessContext | None = None,
     ) -> None:
         self._adapter = adapter
         self._generator = generator
@@ -75,6 +78,7 @@ class ScreeningAgent:
         self._history = conversation_store or ConversationStore(
             self._runtime_config.max_history_turns
         )
+        self._business_context = business_context or BusinessContext()
 
     @property
     def conversation_store(self) -> ConversationStore:
@@ -101,7 +105,8 @@ class ScreeningAgent:
             self._audit.record(customer_id, "message_ignored", "closed")
             return ProcessResult(note="silent_closed")
 
-        # 只记录已通过输入检查且在接收时属于 active 会话的入站消息。
+        # 使用追加当前消息前的有界快照，将 history 与 current message 分开。
+        recent_history = self._history.get(customer_id)
         self._history.append_customer(customer_id, text)
 
         # 明确人工请求是独立业务门禁，优先于普通 LLM 分类。
@@ -118,7 +123,9 @@ class ScreeningAgent:
 
         # LLM 结构化状态估计；任何失败 fail-closed：不发客户可见消息
         try:
-            est = self._adapter.estimate(text)
+            est = self._adapter.estimate_request(
+                ClassificationRequest(message=text, history=recent_history)
+            )
         except LLMError as exc:
             self._audit.record(customer_id, "llm_error", str(exc))
             return ProcessResult(note="fail_closed")
@@ -129,7 +136,13 @@ class ScreeningAgent:
 
         for action in decision.actions:
             if action is Action.REPLY:
-                reply_text = self._prepare_reply(customer_id, decision.reply_kind, text, est)
+                reply_text = self._prepare_reply(
+                    customer_id,
+                    decision.reply_kind,
+                    text,
+                    est,
+                    recent_history,
+                )
                 result.reply_text = reply_text
                 execution = self._executor.execute(
                     customer_id, Action.REPLY, reply_text=reply_text
@@ -168,10 +181,22 @@ class ScreeningAgent:
         return outcomes
 
     def _prepare_reply(
-        self, customer_id: str, kind: ReplyKind | None, message: str, est: Estimation
+        self,
+        customer_id: str,
+        kind: ReplyKind | None,
+        message: str,
+        est: Estimation,
+        history: tuple[ConversationTurn, ...],
     ) -> str:
         """生成回复草稿并过 output_guard；命中防护则替换为安全回复并记审计。"""
-        draft = self._generator.generate(kind or ReplyKind.GENERIC, message, est)
+        request = ReplyRequest.from_estimation(
+            business=self._business_context,
+            history=history,
+            message=message,
+            estimation=est,
+            reply_kind=kind or ReplyKind.GENERIC,
+        )
+        draft = self._generator.generate_request(request)
         guarded = output_guard.sanitize(draft)
         if not guarded.passed:
             self._audit.record(customer_id, "guard_replaced", guarded.reason)

@@ -9,14 +9,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from kapibala.context import ReplyRequest
 from kapibala.schemas import Estimation, ReplyKind
 
 _TEMPLATES = {
     ReplyKind.SOOTHE: "非常抱歉给您带来了不好的体验，您反馈的问题我已经记下了，我们会尽快跟进改进。",
     ReplyKind.REDIRECT: "哈哈这个我可答不上来。还是说回正事——您对我们的产品还有什么想了解的吗？",
     ReplyKind.CONFIRM_FOLLOWUP: "好的，那不打扰您了，我们稍后再联系，祝您顺利！",
-    ReplyKind.PITCH: "太好了！我可以给您详细介绍一下方案，方便的话我们约个时间做个简短演示。",
-    ReplyKind.ANSWER: "关于您的问题，我先把相关资料整理好发您；如果还有疑问随时问我。",
+    ReplyKind.PITCH: "谢谢您的关注。您最想了解哪方面？我会先核实相关信息再回复。",
+    ReplyKind.ANSWER: "这个问题需要核对已确认的产品信息，我先帮您确认，避免给出不准确的答复。",
     ReplyKind.GENERIC: "收到。方便说说您主要想了解哪方面吗？我给您针对性介绍。",
 }
 
@@ -33,6 +34,18 @@ class ReplyGenerator(ABC):
 
         生成结果不代表可以直接发送——必须经过 output_guard 检查与统一发送函数。
         """
+
+    def generate_request(self, request: ReplyRequest) -> str:
+        """Generate from a structured request.
+
+        The default keeps deterministic and test generators compatible while
+        context-aware generators can consume every request field.
+        """
+        estimation = Estimation(
+            intent=request.intent,
+            dissatisfied=request.dissatisfied,
+        )
+        return self.generate(request.reply_kind, request.message, estimation)
 
 
 class TemplateReplyGenerator(ReplyGenerator):

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from kapibala.context import ClassificationRequest
 from kapibala.schemas import Estimation
 
 
@@ -35,3 +36,11 @@ class LLMAdapter(ABC):
         Raises:
             LLMError: 解析失败、字段非法、超时或 API 报错。
         """
+
+    def estimate_request(self, request: ClassificationRequest) -> Estimation:
+        """Estimate from structured context.
+
+        The compatibility default preserves adapters that only consume the
+        current message. Context-aware adapters should override this method.
+        """
+        return self.estimate(request.message)
