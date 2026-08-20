@@ -46,6 +46,11 @@ msg c1 今天天气真好               # 处理一条客户消息
 show_state c1 / reactivate c1 / run_followups
 ```
 
+跟进只能由可信操作员使用
+`schedule_followup <customer_id> <delay_seconds> [context]` 明确标记；标记当轮
+不回复且不占发送额度。客户自然语言中的“明天再联系”等时间表达不会自动创建
+跟进，因为本 demo 未实现可验证的自然语言时间提取器。
+
 ## 约束保证机制
 
 | 约束                                        | 强制层                                                                                      | 状态                                 |
@@ -94,3 +99,4 @@ show_state c1 / reactivate c1 / run_followups
 | A1     | Intent 与 Dissatisfaction 独立分类、严格结构化校验与 fail-closed                                                                                              | 约 25 分钟                                                                   |
 | A2     | 运行时输入校验、按客户隔离的有界对话历史、仅记录确认发送成功的回复，完整离线测试 103 项通过                                                                    | 约 10 分钟                                                                   |
 | A3     | 分类前明确人工请求门禁、中英文归一化与终态静默验证                                                                                                             | 约 10 分钟                                                                   |
+| A5     | 可信人工跟进标记、严格到期时间校验、限流/发送失败重试、升级保留与关闭取消，完成完整测试和真实 Gemini 验证                                        | 约 25 分钟                                                                   |

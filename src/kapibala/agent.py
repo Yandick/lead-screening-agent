@@ -32,10 +32,6 @@ from kapibala.runtime import (
 from kapibala.schemas import Action, Estimation, ReplyKind
 from kapibala.state_machine import SessionState, StateMachine, Transition
 
-#: 默认跟进延迟（秒）
-DEFAULT_FOLLOWUP_DELAY = 3600.0
-
-
 @dataclass
 class ProcessResult:
     """一条客户消息的处理结果摘要，供 CLI 展示。"""
@@ -61,7 +57,6 @@ class ScreeningAgent:
         audit: AuditLog,
         followups: FollowupQueue,
         clock: Callable[[], float] = time.monotonic,
-        followup_delay: float = DEFAULT_FOLLOWUP_DELAY,
         runtime_config: RuntimeConfig | None = None,
         conversation_store: ConversationStore | None = None,
         business_context: BusinessContext | None = None,
@@ -73,7 +68,6 @@ class ScreeningAgent:
         self._audit = audit
         self._followups = followups
         self._clock = clock
-        self._followup_delay = followup_delay
         self._runtime_config = runtime_config or RuntimeConfig()
         self._history = conversation_store or ConversationStore(
             self._runtime_config.max_history_turns
@@ -151,33 +145,76 @@ class ScreeningAgent:
                 if execution.executed and execution.reason == "sent":
                     self._history.append_assistant(customer_id, reply_text)
             elif action is Action.SCHEDULE_FOLLOWUP:
-                followup = Followup(
-                    customer_id=customer_id,
-                    due_at=self._clock() + self._followup_delay,
-                    context=text,
+                self._audit.record(
+                    customer_id,
+                    "action_rejected",
+                    "followup_requires_trusted_operator",
                 )
                 result.executions.append(
-                    self._executor.execute(
-                        customer_id, Action.SCHEDULE_FOLLOWUP, followup=followup
-                    )
+                    ExecutionResult(False, "trusted_operator_required")
                 )
             else:
                 result.executions.append(self._executor.execute(customer_id, action))
         return result
 
+    def schedule_followup(
+        self,
+        customer_id: object,
+        delay_seconds: object,
+        context: object = "",
+    ) -> tuple[Followup, ExecutionResult]:
+        """Create a follow-up only from a trusted operator command.
+
+        Customer text never reaches this entry point. Scheduling queues a marker
+        through the existing executor and does not generate or send a reply.
+        """
+        followup = Followup.from_operator(
+            customer_id,
+            delay_seconds,
+            context,
+            clock=self._clock,
+        )
+        execution = self._executor.execute(
+            followup.customer_id,
+            Action.SCHEDULE_FOLLOWUP,
+            followup=followup,
+        )
+        return followup, execution
+
     def run_followups(self) -> list[tuple[Followup, ExecutionResult]]:
         """触发到期跟进：生成 -> output_guard -> 状态门禁 -> 限流 -> 统一发送。"""
         outcomes: list[tuple[Followup, ExecutionResult]] = []
         for followup in self._followups.pop_due(self._clock()):
-            guarded = output_guard.sanitize(FOLLOWUP_TEMPLATE)
-            if not guarded.passed:
-                self._audit.record(followup.customer_id, "guard_replaced", guarded.reason)
-            execution = self._executor.execute(
-                followup.customer_id, Action.REPLY, reply_text=guarded.text
-            )
+            try:
+                guarded = output_guard.sanitize(FOLLOWUP_TEMPLATE)
+                if not guarded.passed:
+                    self._audit.record(
+                        followup.customer_id, "guard_replaced", guarded.reason
+                    )
+                execution = self._executor.execute(
+                    followup.customer_id, Action.REPLY, reply_text=guarded.text
+                )
+            except Exception as exc:  # Preserve the marker across transport failures.
+                execution = ExecutionResult(False, "delivery_error")
+                self._audit.record(
+                    followup.customer_id,
+                    "followup_delivery_error",
+                    type(exc).__name__,
+                )
             outcomes.append((followup, execution))
             if execution.executed and execution.reason == "sent":
                 self._history.append_assistant(followup.customer_id, guarded.text)
+            elif execution.reason == "closed":
+                self._audit.record(
+                    followup.customer_id, "followup_cancelled", "closed"
+                )
+            else:
+                self._followups.add(followup)
+                self._audit.record(
+                    followup.customer_id,
+                    "followup_retry_pending",
+                    execution.reason,
+                )
         return outcomes
 
     def _prepare_reply(

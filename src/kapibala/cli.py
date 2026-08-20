@@ -2,6 +2,8 @@
 
 命令：
   msg <customer_id> <text>   处理一条客户消息，显示判定摘要、状态变化、动作
+  schedule_followup <customer_id> <delay_seconds> [context]
+                             可信人工标记稍后跟进，本轮不回复
   reactivate <customer_id>   人工恢复 active
   show_state <customer_id>   查看状态机与计数器
   run_followups              触发到期跟进
@@ -15,12 +17,12 @@ from __future__ import annotations
 import os
 import time
 
-from kapibala.agent import DEFAULT_FOLLOWUP_DELAY, ProcessResult, ScreeningAgent
+from kapibala.agent import ProcessResult, ScreeningAgent
 from kapibala.adapters.base import LLMError
 from kapibala.adapters.fake import FakeAdapter
 from kapibala.audit import AuditLog
 from kapibala.executor import Executor
-from kapibala.followup import FollowupQueue
+from kapibala.followup import FollowupQueue, FollowupValidationError
 from kapibala.rate_limiter import SlidingWindowRateLimiter
 from kapibala.reply_generator import TemplateReplyGenerator
 from kapibala.schemas import Estimation, Intent
@@ -28,6 +30,8 @@ from kapibala.state_machine import StateMachine
 
 HELP_TEXT = """可用命令：
   msg <customer_id> <text>   发送一条客户消息（连发会聚合，静默几秒后统一处理）
+  schedule_followup <customer_id> <delay_seconds> [context]
+                             可信人工标记稍后跟进，本轮不回复
   reactivate <customer_id>   人工恢复 active
   show_state <customer_id>   查看状态机与计数器
   run_followups              触发到期跟进
@@ -79,6 +83,25 @@ class CLI:
             return (
                 f"[{cid}] 已接收（{count} 条待聚合，静默 "
                 f"{self._debounce_window:.0f}s 后统一处理）。"
+            )
+        if cmd == "schedule_followup" and len(args) == 2:
+            cid = args[0]
+            schedule_args = args[1].split(maxsplit=1)
+            try:
+                delay_seconds = float(schedule_args[0])
+                context = schedule_args[1] if len(schedule_args) == 2 else ""
+                followup, execution = self._agent.schedule_followup(
+                    cid, delay_seconds, context
+                )
+            except FollowupValidationError as exc:
+                return f"跟进参数非法（{exc.reason}）。"
+            except ValueError:
+                return "跟进参数非法：delay_seconds 必须是有限的非负数。"
+            if not execution.executed:
+                return f"[{followup.customer_id}] 跟进未标记（{execution.reason}）。"
+            return (
+                f"[{followup.customer_id}] 已由人工标记跟进，"
+                f"{delay_seconds:g} 秒后到期；本轮未回复。"
             )
         if cmd == "reactivate" and len(args) >= 1:
             self._sm.reactivate(args[0])
@@ -219,10 +242,9 @@ def build_cli(sink=None) -> CLI:
         adapter = FakeAdapter()
         generator = TemplateReplyGenerator()
         mode = "fake 模式（用 script 命令预排 LLM 判定）"
-    followup_delay = float(os.environ.get("FOLLOWUP_DELAY_SECONDS", DEFAULT_FOLLOWUP_DELAY))
     agent = ScreeningAgent(
         adapter, generator, executor, sm, audit, followups,
-        clock=clock, followup_delay=followup_delay,
+        clock=clock,
     )
     from kapibala.debounce import MessageDebouncer
 
