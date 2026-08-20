@@ -20,6 +20,12 @@ from kapibala.executor import ExecutionResult, Executor
 from kapibala.followup import Followup, FollowupQueue
 from kapibala.policy import PolicyDecision, decide
 from kapibala.reply_generator import FOLLOWUP_TEMPLATE, ReplyGenerator
+from kapibala.runtime import (
+    ConversationStore,
+    InputValidationError,
+    RuntimeConfig,
+    RuntimeInput,
+)
 from kapibala.schemas import Action, Estimation, ReplyKind
 from kapibala.state_machine import SessionState, StateMachine, Transition
 
@@ -31,12 +37,13 @@ DEFAULT_FOLLOWUP_DELAY = 3600.0
 class ProcessResult:
     """一条客户消息的处理结果摘要，供 CLI 展示。"""
 
-    note: str  # "ok" | "silent_escalated" | "silent_closed" | "fail_closed"
+    note: str  # "ok" | "invalid_input" | "silent_*" | "fail_closed"
     estimation: Estimation | None = None
     transition: Transition = field(default_factory=Transition)
     decision: PolicyDecision | None = None
     executions: list[ExecutionResult] = field(default_factory=list)
     reply_text: str | None = None  # 经 output_guard 检查后的回复（发送或被限流的）
+    input_error: str | None = None
 
 
 class ScreeningAgent:
@@ -52,6 +59,8 @@ class ScreeningAgent:
         followups: FollowupQueue,
         clock: Callable[[], float] = time.monotonic,
         followup_delay: float = DEFAULT_FOLLOWUP_DELAY,
+        runtime_config: RuntimeConfig | None = None,
+        conversation_store: ConversationStore | None = None,
     ) -> None:
         self._adapter = adapter
         self._generator = generator
@@ -61,8 +70,27 @@ class ScreeningAgent:
         self._followups = followups
         self._clock = clock
         self._followup_delay = followup_delay
+        self._runtime_config = runtime_config or RuntimeConfig()
+        self._history = conversation_store or ConversationStore(
+            self._runtime_config.max_history_turns
+        )
 
-    def handle_message(self, customer_id: str, text: str) -> ProcessResult:
+    @property
+    def conversation_store(self) -> ConversationStore:
+        """Read-only access to the injected store for later context consumers."""
+        return self._history
+
+    def handle_message(self, customer_id: object, text: object) -> ProcessResult:
+        try:
+            runtime_input = RuntimeInput.validate(
+                customer_id, text, self._runtime_config
+            )
+        except InputValidationError as exc:
+            return ProcessResult(note="invalid_input", input_error=exc.reason)
+
+        customer_id = runtime_input.customer_id
+        text = runtime_input.message
+
         # 前置门禁：escalated / closed 状态下连 LLM 都不调用，直接静默
         session = self._sm.get(customer_id).session
         if session is SessionState.ESCALATED:
@@ -71,6 +99,9 @@ class ScreeningAgent:
         if session is SessionState.CLOSED:
             self._audit.record(customer_id, "message_ignored", "closed")
             return ProcessResult(note="silent_closed")
+
+        # 只记录已通过输入检查且在接收时属于 active 会话的入站消息。
+        self._history.append_customer(customer_id, text)
 
         # LLM 结构化状态估计；任何失败 fail-closed：不发客户可见消息
         try:
@@ -87,9 +118,12 @@ class ScreeningAgent:
             if action is Action.REPLY:
                 reply_text = self._prepare_reply(customer_id, decision.reply_kind, text, est)
                 result.reply_text = reply_text
-                result.executions.append(
-                    self._executor.execute(customer_id, Action.REPLY, reply_text=reply_text)
+                execution = self._executor.execute(
+                    customer_id, Action.REPLY, reply_text=reply_text
                 )
+                result.executions.append(execution)
+                if execution.executed and execution.reason == "sent":
+                    self._history.append_assistant(customer_id, reply_text)
             elif action is Action.SCHEDULE_FOLLOWUP:
                 followup = Followup(
                     customer_id=customer_id,
@@ -112,14 +146,12 @@ class ScreeningAgent:
             guarded = output_guard.sanitize(FOLLOWUP_TEMPLATE)
             if not guarded.passed:
                 self._audit.record(followup.customer_id, "guard_replaced", guarded.reason)
-            outcomes.append(
-                (
-                    followup,
-                    self._executor.execute(
-                        followup.customer_id, Action.REPLY, reply_text=guarded.text
-                    ),
-                )
+            execution = self._executor.execute(
+                followup.customer_id, Action.REPLY, reply_text=guarded.text
             )
+            outcomes.append((followup, execution))
+            if execution.executed and execution.reason == "sent":
+                self._history.append_assistant(followup.customer_id, guarded.text)
         return outcomes
 
     def _prepare_reply(

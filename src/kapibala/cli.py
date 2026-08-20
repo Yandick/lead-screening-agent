@@ -156,6 +156,8 @@ class CLI:
         return f"已预排下一次判定：{self._format_estimation(est)}"
 
     def _format_result(self, cid: str, result: ProcessResult) -> str:
+        if result.note == "invalid_input":
+            return f"[{cid}] 输入无效（{result.input_error}），未调用 LLM。"
         if result.note == "silent_escalated":
             return f"[{cid}] 已转人工，保持静默（消息未作任何处理）。"
         if result.note == "silent_closed":

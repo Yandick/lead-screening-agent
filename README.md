@@ -7,11 +7,14 @@
 ```text
 客户消息
   -> 防抖聚合（连发合并为一批，debounce.py）
+  -> 运行时输入校验（customer_id / 空消息 / 长度上限，runtime.py）
+  -> Terminal 状态门禁 + 按客户隔离的有界历史记录
   -> 两次独立 LLM 分类（intent -> dissatisfied）
   -> 合并结构化状态估计（Estimation，仅数据结构）
   -> 确定性状态机（连续异常计数、会话状态）
   -> 策略层（真值表查表，见 src/kapibala/policy.py 文档字符串）
   -> 执行层（allowlist 校验 -> 状态门禁 -> 滑动窗口限流 -> 统一发送 -> 审计）
+  -> 仅将确认发送成功的回复写入对应客户历史
 ```
 
 - LLM 接入通过 `LLMAdapter` 接口隔离（`src/kapibala/adapters/base.py`），业务代码不依赖具体 SDK；
@@ -20,6 +23,10 @@
 ### A1：Intent 与 Dissatisfaction
 
 `GeminiAdapter` 对当前客户消息分别执行 Intent 和 Dissatisfaction 两次独立调用；第二次调用不读取 Intent 结果，两个结构化结果都校验成功后才合并为 `Estimation`。任意一次失败都 fail closed。
+
+### A2：运行时输入与对话历史
+
+`RuntimeInput` 和 `RuntimeConfig` 在状态加载与 LLM 调用前拒绝缺失/空白客户 ID、空白消息和超长消息。线程安全的 `ConversationStore` 按客户 ID 隔离并保留可配置数量的最近 turn：记录 ACTIVE 会话中通过校验的客户消息，但只有执行器确认发送成功后才记录 assistant 回复，限速拦截的草稿不会进入历史。A2 只建立数据合同，历史注入分类与回复 prompt 留到 A4。
 
 ## 启动方式
 
@@ -85,3 +92,4 @@ show_state c1 / reactivate c1 / run_followups
 | R1     | 设计评审后移除低置信降级机制（真值表 9→7 条）；新增防抖聚合层（连发合并处理，碎片不再重复计数/误触发升级），79 测试全绿                                                | 约 1 小时（含设计分析讨论）                                                  |
 | R2     | LLM 生成式回复草稿（GeminiReplyGenerator，prompt 埋 canary、失败回退模板）、GeminiAdapter.generate_text，84 测试全绿，真实 API 冒烟通过                                  | 约 20 分钟                                                                   |
 | A1     | Intent 与 Dissatisfaction 独立分类、严格结构化校验与 fail-closed                                                                                              | 约 25 分钟                                                                   |
+| A2     | 运行时输入校验、按客户隔离的有界对话历史、仅记录确认发送成功的回复，完整离线测试 103 项通过                                                                    | 约 10 分钟                                                                   |
