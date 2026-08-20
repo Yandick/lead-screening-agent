@@ -43,7 +43,7 @@ def cli_rig():
 
 def test_script_then_msg(cli_rig):
     cli, sent, _ = cli_rig
-    out = cli.handle_line("script intent=interested confidence=0.9")
+    out = cli.handle_line("script intent=interested dissatisfied=false")
     assert "intent=interested" in out
     out = cli.handle_line("msg c1 你们产品我想了解一下")
     assert "intent=interested" in out
@@ -75,15 +75,10 @@ def test_show_state_and_reactivate_and_reset(cli_rig):
     assert "anomaly_count=0" in cli.handle_line("show_state c1")
 
 
-def test_run_followups_command(cli_rig):
-    cli, sent, clock = cli_rig
-    cli.handle_line("script intent=interested followup=true")
-    cli.handle_line("msg c1 下周再聊")
-    assert "没有到期" in cli.handle_line("run_followups")
-    clock.advance(3601)
-    out = cli.handle_line("run_followups")
-    assert "已发送" in out
-    assert len(sent) == 2  # 确认回复 + 跟进触达
+def test_removed_classifier_fields_are_rejected(cli_rig):
+    cli, _, _ = cli_rig
+    assert "未知字段" in cli.handle_line("script followup=true")
+    assert "未知字段" in cli.handle_line("script confidence=0.9")
 
 
 def test_unknown_command(cli_rig):

@@ -65,7 +65,6 @@ def main() -> None:
                     "pred_intent": est.intent.value,
                     "gold_dissatisfied": rec["dissatisfied"],
                     "pred_dissatisfied": est.dissatisfied,
-                    "confidence": est.confidence,
                 }
             )
         print(f"\r[{i}/{len(records)}]", end="", flush=True)
@@ -80,7 +79,7 @@ def main() -> None:
     for case in bad_cases:
         print(
             f"  {case['text'][:40]!r} gold=({case['gold_intent']}, {case['gold_dissatisfied']}) "
-            f"pred=({case['pred_intent']}, {case['pred_dissatisfied']}) conf={case['confidence']:.2f}"
+            f"pred=({case['pred_intent']}, {case['pred_dissatisfied']})"
         )
 
 

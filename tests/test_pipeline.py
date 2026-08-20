@@ -11,11 +11,11 @@ from kapibala.adapters.fake import FakeAdapter
 from kapibala.agent import ScreeningAgent
 from kapibala.audit import AuditLog
 from kapibala.executor import Executor
-from kapibala.followup import FollowupQueue
+from kapibala.followup import Followup, FollowupQueue
 from kapibala.output_guard import CANARY_TOKEN, SAFE_FALLBACK
 from kapibala.rate_limiter import SlidingWindowRateLimiter
 from kapibala.reply_generator import ReplyGenerator
-from kapibala.schemas import Estimation, Intent, ReplyKind
+from kapibala.schemas import Action, Estimation, Intent, ReplyKind
 from kapibala.state_machine import SessionState, StateMachine
 
 
@@ -70,12 +70,27 @@ def test_full_pipeline_interested(rig):
 
 
 def test_llm_error_fail_closed(rig):
-    """LLM 抛错：不发任何客户可见消息，记审计（清单 12）。"""
-    agent, adapter, _, sent, audit, _, _ = rig
+    """任一分类调用抛错：不发送、不执行、不推进已有业务状态。"""
+    agent, adapter, sm, sent, audit, followups, _ = rig
+    sm.apply("c1", est(intent=Intent.OFF_TOPIC))
+    before = (
+        sm.get("c1").session,
+        sm.get("c1").anomaly_count,
+        sm.get("c1").last_estimation,
+    )
     adapter.script(LLMError("timeout"))
     result = agent.handle_message("c1", "hello")
     assert result.note == "fail_closed"
+    assert result.estimation is None
+    assert result.decision is None
+    assert result.executions == []
     assert sent == []
+    assert len(followups) == 0
+    assert (
+        sm.get("c1").session,
+        sm.get("c1").anomaly_count,
+        sm.get("c1").last_estimation,
+    ) == before
     assert any(e.event == "llm_error" for e in audit.events)
 
 
@@ -122,31 +137,28 @@ def test_pipeline_rate_limit_across_messages(rig):
     assert result.executions[0].reason == "rate_limited"
 
 
-def test_followup_full_chain(rig):
-    """跟进：schedule -> 到期 -> 生成 -> 防护 -> 门禁 -> 限流 -> 发送。"""
-    agent, adapter, _, sent, _, followups, clock = rig
-    adapter.script(est(followup_requested=True))
-    agent.handle_message("c1", "下周再聊吧")
-    assert len(followups) == 1
-    assert agent.run_followups() == []  # 未到期
-    clock.advance(3601)  # 跟进到期（同时也越过了限流窗口）
-    outcomes = agent.run_followups()
-    assert len(outcomes) == 1
-    assert outcomes[0][1].executed
-    assert sent[-1][0] == "c1"
+def test_classifier_output_cannot_schedule_followup(rig):
+    """A1 后分类合同没有 scheduling 控制字段，含时间措辞也只按 intent 映射。"""
+    agent, adapter, _, sent, _, followups, _ = rig
+    adapter.script(est(intent=Intent.INTERESTED))
+
+    result = agent.handle_message("c1", "下周再聊吧")
+
+    assert result.decision is not None
+    assert result.decision.actions == (Action.REPLY,)
     assert len(followups) == 0
+    assert len(sent) == 1
 
 
 def test_followup_silenced_for_escalated_customer(rig):
-    """客户在跟进到期前被转人工：跟进触达被门禁拦截。"""
-    agent, adapter, sm, sent, _, _, clock = rig
-    adapter.script(est(followup_requested=True))
-    agent.handle_message("c1", "下周再聊吧")
+    """既有队列项仍受升级静默门禁保护；A1 不创建新的自动跟进。"""
+    agent, _, sm, sent, _, followups, clock = rig
+    followups.add(Followup(customer_id="c1", due_at=clock.t + 3600, context="existing"))
     sm.force_escalate("c1")
     clock.advance(3601)
     outcomes = agent.run_followups()
     assert outcomes[0][1].reason == "escalated_silence"
-    assert len(sent) == 1  # 只有第一条确认回复
+    assert sent == []
 
 
 def test_rejected_closes_then_silent(rig):

@@ -32,8 +32,8 @@ HELP_TEXT = """可用命令：
   show_state <customer_id>   查看状态机与计数器
   run_followups              触发到期跟进
   script <k=v ...>           预排下一次 LLM 判定（fake 模式），如：
-                             script intent=off_topic dissatisfied=true confidence=0.9
-                             script followup=true / script error
+                             script intent=off_topic dissatisfied=true
+                             script error
   reset <customer_id>        清空该客户状态
   help                       显示本帮助
   quit                       退出"""
@@ -143,12 +143,12 @@ class CLI:
             return "已预排：下一次估计抛出 LLMError（演示 fail-closed）。"
         kv = dict(pair.split("=", 1) for pair in spec.split() if "=" in pair)
         try:
+            unknown = set(kv) - {"intent", "dissatisfied"}
+            if unknown:
+                raise ValueError(f"未知字段：{', '.join(sorted(unknown))}")
             est = Estimation(
                 intent=Intent(kv.get("intent", "other")),
                 dissatisfied=kv.get("dissatisfied", "false").lower() == "true",
-                followup_requested=kv.get("followup", "false").lower() == "true",
-                confidence=float(kv.get("confidence", "0.9")),
-                reason="scripted via CLI",
             )
         except ValueError as exc:
             return f"script 参数非法：{exc}"
@@ -192,10 +192,7 @@ class CLI:
     def _format_estimation(est: Estimation | None) -> str:
         if est is None:
             return "（无）"
-        return (
-            f"intent={est.intent.value} dissatisfied={est.dissatisfied} "
-            f"followup={est.followup_requested} confidence={est.confidence:.2f}"
-        )
+        return f"intent={est.intent.value} dissatisfied={est.dissatisfied}"
 
 
 def build_cli(sink=None) -> CLI:

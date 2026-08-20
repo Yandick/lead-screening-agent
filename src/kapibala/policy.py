@@ -7,10 +7,9 @@
 | 1 | intent == rejected | 清零 | mark_not_interested → closed |
 | 2 | dissatisfied == true | +1；≥2 则升级 | escalate_to_human 或 reply（安抚 + 回应其意图） |
 | 3 | intent == off_topic | +1；≥2 则升级 | escalate_to_human 或 reply（礼貌拉回话题） |
-| 4 | intent == interested 且 followup_requested | 清零 | reply（确认）+ schedule_followup |
-| 5 | intent == interested | 清零 | reply（推进转化） |
-| 6 | intent == needs_info | 清零 | reply（解答问题） |
-| 7 | intent == other | 清零 | reply（澄清式回应） |
+| 4 | intent == interested | 清零 | reply（推进转化） |
+| 5 | intent == needs_info | 清零 | reply（解答问题） |
+| 6 | intent == other | 清零 | reply（澄清式回应） |
 
 补充规则：
 
@@ -56,14 +55,7 @@ def decide(est: Estimation, transition: Transition) -> PolicyDecision:
     if est.intent is Intent.OFF_TOPIC:
         return PolicyDecision(actions=(Action.REPLY,), reply_kind=ReplyKind.REDIRECT)
 
-    # 规则 4：有兴趣且要求稍后跟进
-    if est.intent is Intent.INTERESTED and est.followup_requested:
-        return PolicyDecision(
-            actions=(Action.REPLY, Action.SCHEDULE_FOLLOWUP),
-            reply_kind=ReplyKind.CONFIRM_FOLLOWUP,
-        )
-
-    # 规则 5/6/7
+    # 规则 4/5/6
     if est.intent is Intent.INTERESTED:
         return PolicyDecision(actions=(Action.REPLY,), reply_kind=ReplyKind.PITCH)
     if est.intent is Intent.NEEDS_INFO:

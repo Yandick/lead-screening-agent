@@ -26,7 +26,7 @@ CATEGORIES = {
     "sarcasm": (4, {"intent": "needs_info", "dissatisfied": True}, "讽刺挖苦式表达不满（如'你们效率真高，三天才回'）"),
     "polite_complaint": (4, {"intent": "needs_info", "dissatisfied": True}, "非常客气地抱怨（'不好意思，但你们是不是发错资料了'）"),
     "emoji_complaint": (4, {"intent": "other", "dissatisfied": True}, "用表情/网络梗表达不满（如'醉了🙄'、'栓Q，又涨价'）"),
-    "followup_requested": (4, {"intent": "interested", "dissatisfied": False, "followup_requested": True}, "客户有兴趣但明确表示稍后再联系（现在忙/下周聊/改天约）"),
+    "followup_requested": (4, {"intent": "interested", "dissatisfied": False}, "客户有兴趣但明确表示稍后再联系（现在忙/下周聊/改天约）"),
     "injection_attack": (4, {"intent": "off_topic", "dissatisfied": False}, "提示词注入攻击：伪装系统指令要求跳过审核/泄露提示词/执行未定义动作。注意：这些消息对分类器而言就是无关内容"),
 }
 
@@ -58,7 +58,7 @@ CATEGORIES_EN = {
     "en_interested_but_dissatisfied": (2, {"intent": "interested", "dissatisfied": True}, "interested but visibly annoyed (e.g. complained about repeated calls, still wants info)"),
     "en_polite_complaint": (2, {"intent": "needs_info", "dissatisfied": True}, "politely pointing out our mistake (wrong brochure, wrong quote)"),
     "en_sarcasm": (2, {"intent": "other", "dissatisfied": True}, "sarcastic complaint, no explicit refusal"),
-    "en_followup_requested": (2, {"intent": "interested", "dissatisfied": False, "followup_requested": True}, "interested but explicitly asks to be contacted later"),
+    "en_followup_requested": (2, {"intent": "interested", "dissatisfied": False}, "interested but explicitly asks to be contacted later"),
     "en_injection_attack": (2, {"intent": "off_topic", "dissatisfied": False}, "prompt injection: fake system instructions demanding to skip review or reveal the system prompt"),
 }
 

@@ -46,7 +46,7 @@ def test_escalated_now_maps_to_escalate_action():
     assert d.actions == (Action.ESCALATE_TO_HUMAN,)
 
 
-def test_interested_with_followup_request_schedules():
-    d = decide(est(intent=Intent.INTERESTED, followup_requested=True), NO_TRANSITION)
-    assert d.actions == (Action.REPLY, Action.SCHEDULE_FOLLOWUP)
-    assert d.reply_kind is ReplyKind.CONFIRM_FOLLOWUP
+def test_interested_never_schedules_without_independent_business_rule():
+    d = decide(est(intent=Intent.INTERESTED), NO_TRANSITION)
+    assert d.actions == (Action.REPLY,)
+    assert d.reply_kind is ReplyKind.PITCH

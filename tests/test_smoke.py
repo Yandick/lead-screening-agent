@@ -20,9 +20,7 @@ def test_intent_enum_has_five_values():
 def test_estimation_defaults():
     est = Estimation(intent=Intent.INTERESTED)
     assert est.dissatisfied is False
-    assert est.followup_requested is False
-    assert est.confidence == 1.0
-    assert est.reason == ""
+    assert set(est.__dataclass_fields__) == {"intent", "dissatisfied"}
 
 
 def test_llm_adapter_is_abstract():

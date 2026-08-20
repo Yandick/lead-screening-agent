@@ -15,7 +15,7 @@ from kapibala.schemas import Estimation
 class FakeAdapter(LLMAdapter):
     """脚本化适配器。
 
-    - script() 预先排入 Estimation 或异常（LLMError 用于演练 fail-closed）；
+    - script() 预先排入最终合并的 Estimation 或异常（LLMError 用于演练 fail-closed）；
     - 队列空时回落到 responder callable；
     - 两者都没有时抛 LLMError。
     """

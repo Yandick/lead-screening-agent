@@ -1,13 +1,14 @@
 # 获客初筛 Agent（kapibala）
 
-用 LLM 对客户消息做**多维状态估计**（意图 + 情绪不满 + 跟进意愿），再由确定性状态机与策略层选择唯一合法动作执行。LLM 只估计、不决策、不执行；所有硬性约束由代码强制。
+用两次独立 LLM 调用分别判断客户意图与情绪不满，两个 schema 都校验成功后再合并为状态估计，由确定性状态机与策略层选择唯一合法动作执行。LLM 只估计、不决策、不执行；所有硬性约束由代码强制。
 
 ## 架构
 
 ```text
 客户消息
   -> 防抖聚合（连发合并为一批，debounce.py）
-  -> LLM 结构化状态估计（Estimation，仅数据结构）
+  -> 两次独立 LLM 分类（intent -> dissatisfied）
+  -> 合并结构化状态估计（Estimation，仅数据结构）
   -> 确定性状态机（连续异常计数、会话状态）
   -> 策略层（真值表查表，见 src/kapibala/policy.py 文档字符串）
   -> 执行层（allowlist 校验 -> 状态门禁 -> 滑动窗口限流 -> 统一发送 -> 审计）
@@ -15,6 +16,10 @@
 
 - LLM 接入通过 `LLMAdapter` 接口隔离（`src/kapibala/adapters/base.py`），业务代码不依赖具体 SDK；
 - 动作枚举仅 4 个：`reply` / `schedule_followup` / `escalate_to_human` / `mark_not_interested`。
+
+### A1：Intent 与 Dissatisfaction
+
+`GeminiAdapter` 对当前客户消息分别执行 Intent 和 Dissatisfaction 两次独立调用；第二次调用不读取 Intent 结果，两个结构化结果都校验成功后才合并为 `Estimation`。任意一次失败都 fail closed。
 
 ## 启动方式
 
@@ -79,3 +84,4 @@ show_state c1 / reactivate c1 / run_followups
 | M5     | 红蓝攻防（手工 12 条基底 + LLM 变体 12 条，24/24 通过）、攻击报告、README 交付                                                                                   | 约 30 分钟                                                                    |
 | R1     | 设计评审后移除低置信降级机制（真值表 9→7 条）；新增防抖聚合层（连发合并处理，碎片不再重复计数/误触发升级），79 测试全绿                                                | 约 1 小时（含设计分析讨论）                                                  |
 | R2     | LLM 生成式回复草稿（GeminiReplyGenerator，prompt 埋 canary、失败回退模板）、GeminiAdapter.generate_text，84 测试全绿，真实 API 冒烟通过                                  | 约 20 分钟                                                                   |
+| A1     | Intent 与 Dissatisfaction 独立分类、严格结构化校验与 fail-closed                                                                                              | 约 25 分钟                                                                   |
