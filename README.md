@@ -93,3 +93,4 @@ show_state c1 / reactivate c1 / run_followups
 | R2     | LLM 生成式回复草稿（GeminiReplyGenerator，prompt 埋 canary、失败回退模板）、GeminiAdapter.generate_text，84 测试全绿，真实 API 冒烟通过                                  | 约 20 分钟                                                                   |
 | A1     | Intent 与 Dissatisfaction 独立分类、严格结构化校验与 fail-closed                                                                                              | 约 25 分钟                                                                   |
 | A2     | 运行时输入校验、按客户隔离的有界对话历史、仅记录确认发送成功的回复，完整离线测试 103 项通过                                                                    | 约 10 分钟                                                                   |
+| A3     | 分类前明确人工请求门禁、中英文归一化与终态静默验证                                                                                                             | 约 10 分钟                                                                   |

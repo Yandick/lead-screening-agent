@@ -18,6 +18,7 @@ from kapibala.adapters.base import LLMAdapter, LLMError
 from kapibala.audit import AuditLog
 from kapibala.executor import ExecutionResult, Executor
 from kapibala.followup import Followup, FollowupQueue
+from kapibala.human_handoff import is_explicit_human_request
 from kapibala.policy import PolicyDecision, decide
 from kapibala.reply_generator import FOLLOWUP_TEMPLATE, ReplyGenerator
 from kapibala.runtime import (
@@ -102,6 +103,18 @@ class ScreeningAgent:
 
         # 只记录已通过输入检查且在接收时属于 active 会话的入站消息。
         self._history.append_customer(customer_id, text)
+
+        # 明确人工请求是独立业务门禁，优先于普通 LLM 分类。
+        if is_explicit_human_request(text):
+            transition = Transition(escalated_now=True)
+            decision = PolicyDecision(actions=(Action.ESCALATE_TO_HUMAN,))
+            execution = self._executor.execute(customer_id, Action.ESCALATE_TO_HUMAN)
+            return ProcessResult(
+                note="ok",
+                transition=transition,
+                decision=decision,
+                executions=[execution],
+            )
 
         # LLM 结构化状态估计；任何失败 fail-closed：不发客户可见消息
         try:
