@@ -145,10 +145,7 @@ button:disabled { cursor: wait; opacity: .55; }
 .handoff-status strong { font-size: 14px; }
 .handoff-status span { font-size: 12px; line-height: 1.5; }
 
-.operator-actions { padding: 16px 0 20px; border-top: 1px solid var(--line); }
 .action-fields { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; margin-bottom: 10px; }
-.operator-actions form > button { width: 100%; }
-.action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
 
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid #aeb9b4; }
 .tab { min-height: 36px; padding: 7px 14px; color: var(--muted); background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: 0; }
@@ -195,6 +192,6 @@ button:disabled { cursor: wait; opacity: .55; }
   .conversation-log { min-height: 330px; height: 48vh; margin-top: 16px; padding: 12px; }
   .composer-row { grid-template-columns: 1fr; }
   .fake-controls { grid-template-columns: 1fr 1fr; }
-  .action-fields, .action-row { grid-template-columns: 1fr; }
+  .action-fields { grid-template-columns: 1fr; }
   .bubble { max-width: 88%; }
 }

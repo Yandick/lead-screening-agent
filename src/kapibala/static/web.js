@@ -184,35 +184,6 @@ $("#message-form").addEventListener("submit", async (event) => {
   }
 });
 
-$("#run-followups").addEventListener("click", async (event) => {
-  setBusy(event.currentTarget, true);
-  try {
-    const payload = await request("/api/followups/run", { method: "POST", body: "{}" });
-    notice(payload.outcomes.length ? `处理 ${payload.outcomes.length} 条到期跟进` : "没有到期跟进");
-    await refreshCustomer();
-  } catch (error) {
-    notice(error.message, true);
-  } finally {
-    setBusy(event.currentTarget, false);
-  }
-});
-
-$("#reactivate").addEventListener("click", async (event) => {
-  setBusy(event.currentTarget, true);
-  try {
-    state.customer = await request("/api/reactivate", {
-      method: "POST",
-      body: JSON.stringify({ customer_id: customerId() }),
-    });
-    render();
-    notice("客户已由人工重新激活");
-  } catch (error) {
-    notice(error.message, true);
-  } finally {
-    setBusy(event.currentTarget, false);
-  }
-});
-
 $("#reset-session").addEventListener("click", async (event) => {
   setBusy(event.currentTarget, true);
   try {
