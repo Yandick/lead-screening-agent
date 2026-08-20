@@ -2,7 +2,7 @@
 
 每个动作依次经过：
 1. allowlist 校验——非 Action 枚举一律拒绝（未知动作、伪造工具调用）；
-2. 状态门禁——escalated / closed 状态下静默（仅幂等确认对应动作）；
+2. 状态门禁——escalated 状态下所有自动动作静默；closed 不再自动处理；
 3. 滑动窗口限流——仅 reply 占用配额；
 4. 统一发送函数——唯一写限流时间戳的地方，之后写审计。
 """
@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from kapibala.audit import AuditLog
 from kapibala.followup import Followup, FollowupQueue
 from kapibala.rate_limiter import RateLimitReservation, SlidingWindowRateLimiter
-from kapibala.reply_generator import HANDOFF_NOTICE
 from kapibala.schemas import Action
 from kapibala.state_machine import SessionState, StateMachine
 
@@ -68,10 +67,6 @@ class Executor:
 
         # 2. 状态门禁：escalated 严格静默；closed 不再自动处理
         if session is SessionState.ESCALATED:
-            if action is Action.ESCALATE_TO_HUMAN:
-                # 状态机已确定性升级，动作作为幂等确认记账
-                self._audit.record(customer_id, "escalate_confirmed")
-                return ExecutionResult(True, "already_escalated")
             self._audit.record(customer_id, "action_silenced", action.value)
             return ExecutionResult(False, "escalated_silence")
         if session is SessionState.CLOSED:
@@ -97,29 +92,6 @@ class Executor:
         self._sm.force_close(customer_id)
         self._audit.record(customer_id, "marked_not_interested")
         return ExecutionResult(True, "closed")
-
-    def notify_handoff(self, customer_id: str) -> ExecutionResult:
-        """Send the one controlled transition notice for an escalated session.
-
-        This is deliberately separate from ``execute(Action.REPLY)``: ordinary
-        replies remain blocked after escalation, while the transition path can
-        emit a fixed, code-owned notice. The same customer rate limit applies.
-        """
-        if self._sm.get(customer_id).session is not SessionState.ESCALATED:
-            self._audit.record(
-                customer_id, "handoff_notice_rejected", "not_escalated"
-            )
-            return ExecutionResult(False, "not_escalated")
-        if not self._sm.consume_handoff_notice(customer_id):
-            self._audit.record(
-                customer_id, "handoff_notice_rejected", "already_attempted"
-            )
-            return ExecutionResult(False, "handoff_notice_already_attempted")
-
-        result = self._execute_reply(customer_id, HANDOFF_NOTICE)
-        event = "handoff_notice_sent" if result.executed else "handoff_notice_blocked"
-        self._audit.record(customer_id, event, result.reason)
-        return result
 
     def reset_customer(self, customer_id: str) -> None:
         """Clear executor-owned per-customer state for a new demo session."""

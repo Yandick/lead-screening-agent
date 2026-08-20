@@ -131,6 +131,19 @@ button:disabled { cursor: wait; opacity: .55; }
 .status-grid div { min-height: 76px; padding: 13px; background: #fff; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .status-grid span { display: block; color: var(--muted); font-size: 11px; }
 .status-grid strong { display: block; margin-top: 8px; font-size: 16px; overflow-wrap: anywhere; }
+.handoff-status {
+  display: grid;
+  gap: 4px;
+  margin: -6px 0 20px;
+  padding: 12px 14px;
+  border: 1px solid #d7a83e;
+  border-left: 4px solid #c28b14;
+  background: #fff8e8;
+  color: #5f470f;
+}
+.handoff-status[hidden] { display: none; }
+.handoff-status strong { font-size: 14px; }
+.handoff-status span { font-size: 12px; line-height: 1.5; }
 
 .operator-actions { padding: 16px 0 20px; border-top: 1px solid var(--line); }
 .action-fields { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; margin-bottom: 10px; }

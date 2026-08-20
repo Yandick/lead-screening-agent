@@ -62,6 +62,7 @@ function render() {
   $("#streak-value").textContent = customer.state.anomaly_count;
   $("#intent-value").textContent = customer.state.last_estimation?.intent || "none";
   $("#pending-value").textContent = customer.followups.length;
+  $("#handoff-status").hidden = customer.state.session !== "escalated";
   renderConversation([
     ...customer.history,
     ...(customer.buffered_messages || []).map((turn) => ({ ...turn, buffered: true })),
@@ -165,6 +166,7 @@ $("#message-form").addEventListener("submit", async (event) => {
     }
     const result = payload.result;
     if (result.note === "invalid_input") notice(`输入无效 · ${result.input_error}`, true);
+    else if (result.transition.escalated_now) notice("已转人工 · 自动处理已静默");
     else if (result.note === "buffered") {
       const aggregation = payload.aggregation;
       notice(

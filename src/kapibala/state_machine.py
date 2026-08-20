@@ -29,7 +29,6 @@ class CustomerState:
     session: SessionState = SessionState.ACTIVE
     anomaly_count: int = 0  # off_topic 与 dissatisfied 共享的连续计数器
     last_estimation: Estimation | None = None
-    handoff_notice_pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -68,7 +67,6 @@ class StateMachine:
             st.anomaly_count += 1
             if st.anomaly_count >= ESCALATION_THRESHOLD:
                 st.session = SessionState.ESCALATED
-                st.handoff_notice_pending = True
                 return Transition(escalated_now=True)
 
         # A first-turn dissatisfied rejection still closes the conversation.
@@ -89,28 +87,17 @@ class StateMachine:
         st = self.get(customer_id)
         st.session = SessionState.ACTIVE
         st.anomaly_count = 0
-        st.handoff_notice_pending = False
 
     def force_escalate(self, customer_id: str) -> None:
         """执行层执行 escalate_to_human 时调用。"""
         st = self.get(customer_id)
         if st.session is not SessionState.ESCALATED:
             st.session = SessionState.ESCALATED
-            st.handoff_notice_pending = True
-
-    def consume_handoff_notice(self, customer_id: str) -> bool:
-        """Consume the single controlled notice opportunity for this handoff."""
-        st = self.get(customer_id)
-        if st.session is not SessionState.ESCALATED or not st.handoff_notice_pending:
-            return False
-        st.handoff_notice_pending = False
-        return True
 
     def force_close(self, customer_id: str) -> None:
         """执行层执行 mark_not_interested 时调用。"""
         st = self.get(customer_id)
         st.session = SessionState.CLOSED
-        st.handoff_notice_pending = False
 
     def reset(self, customer_id: str) -> None:
         """清空该客户状态（演示用）。"""

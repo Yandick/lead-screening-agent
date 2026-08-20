@@ -21,7 +21,7 @@ from kapibala.executor import ExecutionResult, Executor
 from kapibala.followup import Followup, FollowupQueue
 from kapibala.human_handoff import is_explicit_human_request
 from kapibala.policy import PolicyDecision, decide
-from kapibala.reply_generator import FOLLOWUP_TEMPLATE, HANDOFF_NOTICE, ReplyGenerator
+from kapibala.reply_generator import FOLLOWUP_TEMPLATE, ReplyGenerator
 from kapibala.runtime import (
     ConversationStore,
     ConversationTurn,
@@ -136,7 +136,7 @@ class ScreeningAgent:
                 transition=transition,
                 decision=decision,
             )
-            self._escalate_and_notify(customer_id, result)
+            self._escalate(customer_id, result)
             return result
 
         # LLM 结构化状态估计；任何失败 fail-closed：不发客户可见消息
@@ -182,29 +182,16 @@ class ScreeningAgent:
                     )
                 )
             elif action is Action.ESCALATE_TO_HUMAN:
-                self._escalate_and_notify(customer_id, result)
+                self._escalate(customer_id, result)
             else:
                 result.executions.append(self._executor.execute(customer_id, action))
         return result
 
-    def _escalate_and_notify(
-        self, customer_id: str, result: ProcessResult
-    ) -> None:
-        """Commit escalation, attempt one rate-limited notice, then stay silent."""
+    def _escalate(self, customer_id: str, result: ProcessResult) -> None:
+        """Commit escalation without emitting any customer-visible message."""
         result.executions.append(
             self._executor.execute(customer_id, Action.ESCALATE_TO_HUMAN)
         )
-        result.reply_text = HANDOFF_NOTICE
-        try:
-            notice = self._executor.notify_handoff(customer_id)
-        except Exception as exc:
-            notice = ExecutionResult(False, "delivery_error")
-            self._audit.record(
-                customer_id, "handoff_notice_delivery_error", type(exc).__name__
-            )
-        result.executions.append(notice)
-        if notice.executed and notice.reason == "sent":
-            self._history.append_assistant(customer_id, HANDOFF_NOTICE)
 
     def run_followups(self) -> list[tuple[Followup, ExecutionResult]]:
         """触发到期跟进：生成 -> output_guard -> 状态门禁 -> 限流 -> 统一发送。"""

@@ -23,10 +23,6 @@ _TEMPLATES = {
 #: 跟进触达话术（run_followups 使用）
 FOLLOWUP_TEMPLATE = "您好，之前和您聊过我们的方案，想跟进一下您这边考虑得怎么样了？"
 
-#: 转人工状态切换时发送的受控通知。该文本不经过 LLM 生成。
-HANDOFF_NOTICE = "已为您转接人工同事，后续将由人工跟进。"
-
-
 class ReplyGenerator(ABC):
     """回复生成器接口。"""
 
