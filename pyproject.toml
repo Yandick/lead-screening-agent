@@ -16,6 +16,11 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+guard = [
+    "torch>=2.0",
+    "transformers>=4.40",
+    "modelscope>=1.20",
+]
 
 [project.scripts]
 kapibala = "kapibala.web:main"

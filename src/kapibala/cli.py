@@ -235,6 +235,8 @@ class CLI:
             return f"[{cid}] 会话已关闭，不再自动处理。"
         if result.note == "fail_closed":
             return f"[{cid}] LLM 调用失败，已进入安全的待处理状态（未发送任何消息）。"
+        if result.note == "injection_blocked":
+            return f"[{cid}] 输入侧注入检测命中，消息未进入 LLM 流程。\n回复：{result.reply_text}"
         lines = [f"[{cid}] 判定：{self._format_estimation(result.estimation)}"]
         t = result.transition
         if t.escalated_now:
@@ -293,9 +295,12 @@ def build_cli(sink=None) -> CLI:
         adapter = FakeAdapter()
         generator = TemplateReplyGenerator()
         mode = "fake 模式（用 script 命令预排 LLM 判定）"
+    from kapibala.injection_guard import build_default_guard
+
     agent = ScreeningAgent(
         adapter, generator, executor, sm, audit, followups,
         clock=clock,
+        injection_guard=build_default_guard(),
     )
     message_buffer = ReplyIntervalBuffer(
         agent.handle_message,

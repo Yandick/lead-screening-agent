@@ -1,7 +1,9 @@
 """管道编排：把各层串成完整的处理链路。
 
 客户消息
+  -> 运行时输入校验
   -> 状态门禁前置（escalated/closed 直接静默，连 LLM 都不调用）
+  -> 输入侧注入检测（injection_guard，命中则不喂 LLM、固定话术、记审计）
   -> LLM 结构化状态估计（LLMError -> fail-closed：不发消息、记审计）
   -> 状态机 apply -> 策略层 decide
   -> 回复生成 -> output_guard -> 执行层（allowlist/门禁/限流/统一发送）
@@ -20,6 +22,7 @@ from kapibala.context import BusinessContext, ClassificationRequest, ReplyReques
 from kapibala.executor import ExecutionResult, Executor
 from kapibala.followup import Followup, FollowupQueue
 from kapibala.human_handoff import is_explicit_human_request
+from kapibala.injection_guard import INJECTION_BLOCK_REPLY, InjectionGuard
 from kapibala.policy import PolicyDecision, decide
 from kapibala.reply_generator import FOLLOWUP_TEMPLATE, ReplyGenerator
 from kapibala.runtime import (
@@ -64,6 +67,7 @@ class ScreeningAgent:
         conversation_store: ConversationStore | None = None,
         business_context: BusinessContext | None = None,
         followup_delay_seconds: float = DEFAULT_FOLLOWUP_DELAY_SECONDS,
+        injection_guard: InjectionGuard | None = None,
     ) -> None:
         self._adapter = adapter
         self._generator = generator
@@ -78,6 +82,7 @@ class ScreeningAgent:
         )
         self._business_context = business_context or BusinessContext()
         self._followup_delay_seconds = followup_delay_seconds
+        self._injection_guard = injection_guard
 
     @property
     def conversation_store(self) -> ConversationStore:
@@ -122,6 +127,27 @@ class ScreeningAgent:
         if session is SessionState.CLOSED:
             self._audit.record(customer_id, "message_ignored", "closed")
             return ProcessResult(note="silent_closed")
+
+        # 输入侧注入检测：命中则不追加历史、不调 LLM、不计异常计数，
+        # 固定话术回复并记审计。检测器异常时 fail-open（下游确定性层兜底）。
+        if self._injection_guard is not None:
+            try:
+                unsafe = self._injection_guard.is_unsafe(text)
+            except Exception as exc:
+                self._audit.record(
+                    customer_id, "injection_guard_error", type(exc).__name__
+                )
+                unsafe = False
+            if unsafe:
+                self._audit.record(customer_id, "injection_blocked", "prompt_guard")
+                reply_text = output_guard.sanitize(INJECTION_BLOCK_REPLY).text
+                result = ProcessResult(note="injection_blocked", reply_text=reply_text)
+                result.executions.append(
+                    self._executor.execute(
+                        customer_id, Action.REPLY, reply_text=reply_text
+                    )
+                )
+                return result
 
         # 使用追加当前消息前的有界快照，将 history 与 current message 分开。
         recent_history = self._history.get(customer_id)

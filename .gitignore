@@ -23,3 +23,7 @@ security-lab/
 
 # 教学讲解文档（逐课讲解项目设计，不入 Git）
 tutorial/
+
+# 注入检测模型文件（首次运行自动下载到此，不入库）
+models/
+.peers/

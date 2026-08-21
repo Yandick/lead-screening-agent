@@ -391,6 +391,8 @@ def build_web_application(sink=None) -> WebApplication:
         generator = TemplateReplyGenerator()
         mode = "fake · deterministic"
 
+    from kapibala.injection_guard import build_default_guard
+
     agent = ScreeningAgent(
         adapter,
         generator,
@@ -399,6 +401,7 @@ def build_web_application(sink=None) -> WebApplication:
         audit,
         followups,
         clock=clock,
+        injection_guard=build_default_guard(),
     )
     return WebApplication(agent, state_machine, adapter, audit, mode, clock)
 
