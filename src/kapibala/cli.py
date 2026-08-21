@@ -186,7 +186,7 @@ class CLI:
             self._debouncer.reset(customer_id)
 
     def drain(self) -> None:
-        """退出前立即处理所有待聚合批次。"""
+        """退出前清理：取消定时器；ReplyIntervalBuffer 的待聚合批次直接丢弃不处理。"""
         for timer in self._timers.values():
             timer.cancel()
         self._timers.clear()
